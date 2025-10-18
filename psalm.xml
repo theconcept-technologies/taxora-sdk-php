@@ -16,7 +16,6 @@
         <ignoreFiles>
             <directory name="vendor"/>
             <directory name="resources"/>
-            <directory name="build"/>
             <directory name=".github"/>
             <directory name="tests/Fixtures"/>
         </ignoreFiles>
