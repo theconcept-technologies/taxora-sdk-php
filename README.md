@@ -6,6 +6,7 @@
 > **Official PHP SDK for the [Taxora VAT Validation API](https://taxora.io)**
 > Validate EU VAT numbers, generate compliance certificates, and integrate VAT checks seamlessly into your systems — all with clean, modern PHP.
 
+![Build](https://github.com/theconcept-technologies/taxora-sdk-php/actions/workflows/ci.yml/badge.svg)
 ---
 
 ## 🚀 Overview
