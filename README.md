@@ -195,8 +195,7 @@ $client = new TaxoraClient(..., environment: Environment::PRODUCTION);
 
 ## ⚠️ Deprecations
 
-For backward compatibility, `TaxoraClient` still exposes old top-level methods like `validateVat()` and `getCompany()`.
-These are **deprecated** — use the new endpoint accessors instead.
+So fresh there aren't even any deprecated features yet. Check back in a few months when we're on v47 and have made some regrettable decisions. 🎉
 
 ---
 
