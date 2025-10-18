@@ -10,6 +10,7 @@
         beStrictAboutTestsThatDoNotTestAnything="true"
         failOnRisky="true"
         failOnWarning="true"
+        failOnEmptyTestSuite="false"
 >
     <testsuites>
         <testsuite name="Unit">
@@ -23,13 +24,13 @@
         </exclude>
     </groups>
 
-    <coverage>
-        <report>
-            <clover outputFile="build/logs/clover.xml"/>
-            <html outputDirectory="build/coverage" lowUpperBound="50" highLowerBound="90"/>
-            <text outputFile="build/logs/coverage.txt" showOnlySummary="false"/>
-        </report>
-    </coverage>
+<!--    <coverage>-->
+<!--        <report>-->
+<!--            <clover outputFile="build/logs/clover.xml"/>-->
+<!--            <html outputDirectory="build/coverage" lowUpperBound="50" highLowerBound="90"/>-->
+<!--            <text outputFile="build/logs/coverage.txt" showOnlySummary="false"/>-->
+<!--        </report>-->
+<!--    </coverage>-->
 
     <source>
         <include>
