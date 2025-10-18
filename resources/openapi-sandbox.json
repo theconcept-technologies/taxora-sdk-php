@@ -1,0 +1,1442 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "VAT API v1",
+        "description": "API for VAT UID validation, state retrieval, history, and search.",
+        "contact": {
+            "email": "support@theconcept-technologies.com"
+        },
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "https://sandbox.taxora.io/v1",
+            "description": "VAT API Server"
+        }
+    ],
+    "paths": {
+        "/api/v1/company": {
+            "get": {
+                "tags": [
+                    "Company"
+                ],
+                "summary": "Get the authenticated user's company",
+                "description": "Returns the company information for the authenticated user",
+                "operationId": "41dd1c5c722f08c7a65e10dc84207302",
+                "responses": {
+                    "200": {
+                        "description": "Company retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/login": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "User Login",
+                "description": "Authenticates the user and returns an access token.",
+                "operationId": "05d536c846963ff3d47fe782fa7f5435",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "description": "User email address",
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "user@example.com"
+                                    },
+                                    "password": {
+                                        "description": "User password",
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "password123"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful login",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "access_token": {
+                                            "description": "Access token for authenticated requests",
+                                            "type": "string",
+                                            "example": "<your-jwt-token>"
+                                        },
+                                        "token_type": {
+                                            "description": "Token type",
+                                            "type": "string",
+                                            "example": "Bearer"
+                                        },
+                                        "expires_in": {
+                                            "description": "Token expiration time in seconds",
+                                            "type": "integer",
+                                            "example": 3600
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error"
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid credentials"
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                }
+            }
+        },
+        "/api/v1/refresh": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Refresh Access Token",
+                "description": "Deletes the existing token and generates a new one.",
+                "operationId": "f8fd7e9a4976fc38726c0072c991c881",
+                "responses": {
+                    "200": {
+                        "description": "Successful token refresh",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "access_token": {
+                                            "description": "New access token",
+                                            "type": "string",
+                                            "example": "Bearer <new-access-token>"
+                                        },
+                                        "token_type": {
+                                            "description": "Token type",
+                                            "type": "string",
+                                            "example": "Bearer"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/auth/register": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Register a new user",
+                "description": "Register a new user with optional company information",
+                "operationId": "cc42accada9f853846228ceeea507302",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "John Doe"
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "john@example.com"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "password123"
+                                    },
+                                    "terms": {
+                                        "type": "boolean",
+                                        "example": true
+                                    },
+                                    "image_url": {
+                                        "type": "string",
+                                        "example": "https://example.com/avatar.jpg"
+                                    },
+                                    "company": {
+                                        "properties": {
+                                            "name": {
+                                                "type": "string",
+                                                "example": "Company Name"
+                                            },
+                                            "vat_uid": {
+                                                "type": "string",
+                                                "example": "VAT123456"
+                                            },
+                                            "address_line_1": {
+                                                "type": "string",
+                                                "example": "123 Main St"
+                                            },
+                                            "street": {
+                                                "type": "string",
+                                                "example": "Main St"
+                                            },
+                                            "zip_code": {
+                                                "type": "string",
+                                                "example": "12345"
+                                            },
+                                            "city": {
+                                                "type": "string",
+                                                "example": "City"
+                                            },
+                                            "phone_number": {
+                                                "type": "string",
+                                                "example": "+1234567890"
+                                            },
+                                            "country_code": {
+                                                "type": "string",
+                                                "example": "US"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "User registered successfully"
+                    },
+                    "422": {
+                        "description": "Validation failed"
+                    }
+                }
+            }
+        },
+        "/api/v1/two-factor-authentication/status": {
+            "get": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Get 2FA Status",
+                "description": "Returns the current status of two-factor authentication for the authenticated user.",
+                "operationId": "c219043cf7246f56528e4fcda6eaf16c",
+                "responses": {
+                    "200": {
+                        "description": "Successful operation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "enabled": {
+                                            "description": "Whether 2FA is enabled",
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "confirmed": {
+                                            "description": "Whether 2FA is confirmed",
+                                            "type": "boolean",
+                                            "example": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/two-factor-authentication": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Enable 2FA",
+                "description": "Enables two-factor authentication for the authenticated user.",
+                "operationId": "242fe31b2402031a158ac9d424e44883",
+                "responses": {
+                    "200": {
+                        "description": "2FA enabled successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "qr_code": {
+                                            "description": "QR code SVG for Google Authenticator",
+                                            "type": "string"
+                                        },
+                                        "recovery_codes": {
+                                            "description": "Recovery codes",
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Disable 2FA",
+                "description": "Disables two-factor authentication for the authenticated user.",
+                "operationId": "270c1f45af6f4945f398cfffdc2a7ddc",
+                "responses": {
+                    "200": {
+                        "description": "2FA disabled successfully"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/two-factor-authentication/confirm": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Confirm 2FA",
+                "description": "Confirms two-factor authentication for the authenticated user.",
+                "operationId": "280b7514329c45a7b40623e334796b0a",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "code"
+                                ],
+                                "properties": {
+                                    "code": {
+                                        "description": "2FA verification code",
+                                        "type": "string",
+                                        "example": "123456"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "2FA confirmed successfully"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "422": {
+                        "description": "Invalid code"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/two-factor-authentication/recovery-codes": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Generate New Recovery Codes",
+                "description": "Generates new recovery codes for the authenticated user.",
+                "operationId": "70c83d1451be05c5d0fbd3491f27e77b",
+                "responses": {
+                    "200": {
+                        "description": "Recovery codes generated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "recovery_codes": {
+                                            "description": "New recovery codes",
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "422": {
+                        "description": "2FA not enabled"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/vat/validate": {
+            "post": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Validate a VAT UID",
+                "description": "Checks if a VAT UID is valid.",
+                "operationId": "d526a1e21e3ea5ab46bd0ab52942412e",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "vat_uid"
+                                ],
+                                "properties": {
+                                    "vat_uid": {
+                                        "description": "The VAT UID to validate",
+                                        "type": "string",
+                                        "example": "ATU12345678"
+                                    },
+                                    "company_name": {
+                                        "description": "The company name to validate against the VAT UID",
+                                        "type": "string",
+                                        "example": "Example Company GmbH"
+                                    },
+                                    "provider": {
+                                        "description": "The VAT provider to use for validation. Possible values: 'fon' (Fon), 'vies' (Vies), 'uk_hmrc' (UK HMRC), 'ai_search' (AI Search), 'fon_vies_ai_search' (Fon + Vies + AI Search), 'uk_hmrc_ai_search' (UK HMRC + AI Search), 'fon_ai_search' (Fon + AI Search), 'fon_vies' (Fon + Vies), 'vies_ai_search' (Vies + AI Search). Default is null.",
+                                        "type": "string",
+                                        "example": "vies"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "VAT UID is valid",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/VatResource"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input"
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/vat/validate-multiple": {
+            "post": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Validate multiple VAT UIDs",
+                "description": "Checks if multiple VAT UIDs are valid and returns their validation status.",
+                "operationId": "92c4426e908bbe567f073f92d7ca918c",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "vat_uids"
+                                ],
+                                "properties": {
+                                    "vat_uids": {
+                                        "description": "An array of VAT UIDs to validate",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "example": "ATU12345678"
+                                        }
+                                    },
+                                    "company_names": {
+                                        "description": "An optional array of company names to validate against the VAT UIDs (order should match vat_uids array)",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "example": "Example Company GmbH"
+                                        }
+                                    },
+                                    "provider": {
+                                        "description": "The VAT provider to use for validation. Possible values: 'fon' (Fon), 'vies' (Vies), 'uk_hmrc' (UK HMRC), 'ai_search' (AI Search), 'fon_vies_ai_search' (Fon + Vies + AI Search), 'uk_hmrc_ai_search' (UK HMRC + AI Search), 'fon_ai_search' (Fon + AI Search), 'fon_vies' (Fon + Vies), 'vies_ai_search' (Vies + AI Search). Default is null.",
+                                        "type": "string",
+                                        "example": "vies"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "List of validated VAT UIDs",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/components/schemas/VatResource"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input"
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/vat/validate-schema": {
+            "post": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Validate VAT UID Schema",
+                "description": "Validates if the given VAT UID follows the correct format and schema based on country-specific VAT rules.",
+                "operationId": "41e8dbbd2b28f16149e4f7583854f5b3",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "vat_uid"
+                                ],
+                                "properties": {
+                                    "vat_uid": {
+                                        "description": "The VAT UID to be validated",
+                                        "type": "string",
+                                        "maxLength": 15,
+                                        "example": "ATU12345678"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "VAT UID validation result",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "valid": {
+                                                    "description": "Indicates whether the VAT UID is valid",
+                                                    "type": "boolean",
+                                                    "example": true
+                                                },
+                                                "message": {
+                                                    "description": "Descriptive validation message",
+                                                    "type": "string",
+                                                    "example": "Valid VAT UID."
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request - Invalid Input",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Invalid format: A VAT UID must start with two uppercase letters."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Unexpected error occurred."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/vat/state": {
+            "post": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Get the state of a VAT UID",
+                "description": "Retrieves the current state of a VAT UID.",
+                "operationId": "d0579a2c9933be1f97d28fc6021f7d0f",
+                "parameters": [
+                    {
+                        "name": "vat_uid",
+                        "in": "query",
+                        "description": "VAT UID to check",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "example": "ATU12345678"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "VAT State retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "state": {
+                                            "type": "string",
+                                            "example": "VALID"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid VAT UID"
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/vat/history": {
+            "post": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Get VAT history",
+                "description": "Retrieves the history of a VAT UID.",
+                "operationId": "5a4ad50e256d77bcb7e4f68dcf17a19b",
+                "parameters": [
+                    {
+                        "name": "vat_uid",
+                        "in": "query",
+                        "description": "VAT UID to retrieve history for (optional)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "ATU12345678"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "VAT History retrieved",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/VatCollection"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/vat/search": {
+            "post": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Search VAT records",
+                "description": "Find VAT records based on search filters.",
+                "operationId": "3d3ae2f42786da1f78b075cd31617cd6",
+                "parameters": [
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Search term to filter VAT records",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "Company Name"
+                        }
+                    },
+                    {
+                        "name": "perPage",
+                        "in": "query",
+                        "description": "Number of results per page",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "example": 30
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "VAT search results",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/VatCollection"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/vat/certificate": {
+            "post": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Generate VAT Confirmation Certificate",
+                "description": "Generates a downloadable PDF certificate for a validated VAT ID based on the provided UUID. The certificate language defaults to English if not specified.",
+                "operationId": "generateVatCertificate",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "uuid"
+                                ],
+                                "properties": {
+                                    "uuid": {
+                                        "description": "Unique identifier of the VAT validation request.",
+                                        "type": "string",
+                                        "example": "d7b4f3a9-8c23-4f8d-94a1-b1a90c8f254c"
+                                    },
+                                    "lang": {
+                                        "description": "(Optional) Language for the generated PDF certificate. Allowed values: 'en' (English), 'de' (German). Defaults to 'en' if not provided.",
+                                        "type": "string",
+                                        "example": "en",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "PDF file generated successfully",
+                        "headers": {
+                            "Content-Type": {
+                                "description": "application/pdf",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/pdf": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "The given data was invalid."
+                                        },
+                                        "errors": {
+                                            "properties": {
+                                                "uuid": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string",
+                                                        "example": "The selected uuid is invalid."
+                                                    }
+                                                },
+                                                "lang": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string",
+                                                        "example": "The selected language is invalid. Allowed values: 'en', 'de'."
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "UUID not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "UUID not found."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Internal Server Error."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/vat/certificates/bulk-export": {
+            "post": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Initiate Bulk Export of VAT Certificates",
+                "description": "Initiates an asynchronous process to export multiple VAT certificates for a company within a date range. The process generates a ZIP file containing all certificates and sends an email with a download link when complete.",
+                "operationId": "initiateVatCertificatesBulkExport",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "from_date",
+                                    "to_date"
+                                ],
+                                "properties": {
+                                    "from_date": {
+                                        "description": "Start date for the export range (YYYY-MM-DD)",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2023-01-01"
+                                    },
+                                    "to_date": {
+                                        "description": "End date for the export range (YYYY-MM-DD)",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2023-12-31"
+                                    },
+                                    "countries": {
+                                        "description": "Optional array of country codes to filter by (e.g. ['DE', 'AT'])",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "nullable": true
+                                    },
+                                    "lang": {
+                                        "description": "Optional language for the certificates. Allowed values: 'en' (English), 'de' (German). Defaults to 'en' if not provided.",
+                                        "type": "string",
+                                        "example": "en",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Export process initiated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "VAT certificates export initiated. You will receive an email with a download link when the export is complete."
+                                        },
+                                        "export_id": {
+                                            "description": "Unique identifier for the export job",
+                                            "type": "string",
+                                            "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "The given data was invalid."
+                                        },
+                                        "errors": {
+                                            "properties": {
+                                                "from_date": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string",
+                                                        "example": "The from date field is required."
+                                                    }
+                                                },
+                                                "to_date": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string",
+                                                        "example": "The to date field is required."
+                                                    }
+                                                },
+                                                "lang": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string",
+                                                        "example": "The selected language is invalid. Allowed values: 'en', 'de'."
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Internal Server Error."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/vat/certificates/download/{exportId}": {
+            "get": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Download VAT Certificates Bulk Export",
+                "description": "Downloads a ZIP file containing VAT certificates that were previously exported. The export must belong to the company of the authenticated user.",
+                "operationId": "downloadVatCertificatesBulkExport",
+                "parameters": [
+                    {
+                        "name": "exportId",
+                        "in": "path",
+                        "description": "The unique identifier of the export job",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ZIP file containing VAT certificates",
+                        "headers": {
+                            "Content-Type": {
+                                "description": "application/zip",
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "content": {
+                            "application/zip": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid export ID"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Export job does not belong to the company"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Export job not found"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Server Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Internal Server Error"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "VatCollection": {
+                "title": "VAT Collection",
+                "description": "A collection of VAT records",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/VatResource"
+                        }
+                    },
+                    "links": {
+                        "properties": {
+                            "self": {
+                                "type": "string",
+                                "example": "https://api.taxora.io/api/v1/vat/history"
+                            }
+                        },
+                        "type": "object"
+                    }
+                },
+                "type": "object"
+            },
+            "VatResource": {
+                "title": "VAT Resource",
+                "description": "Response structure for a VAT request",
+                "properties": {
+                    "uuid": {
+                        "description": "Unique identifier for the VAT record",
+                        "type": "string",
+                        "format": "uuid",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "vat_uid": {
+                        "description": "The validated VAT UID",
+                        "type": "string",
+                        "example": "ATU12345678"
+                    },
+                    "state": {
+                        "description": "State of the VAT number (e.g., VALID, INVALID, NOT_FOUND)",
+                        "type": "string",
+                        "example": "VALID"
+                    },
+                    "country_code": {
+                        "description": "Country code of the VAT registration",
+                        "type": "string",
+                        "example": "AT"
+                    },
+                    "company_name": {
+                        "description": "Registered company name for the VAT number",
+                        "type": "string",
+                        "example": "Example GmbH"
+                    },
+                    "company_address": {
+                        "description": "Registered company address",
+                        "type": "string",
+                        "example": "Musterstraße 12, 1010 Wien, Austria"
+                    },
+                    "requested_company_name": {
+                        "description": "The company name that was provided during the VAT validation request",
+                        "type": "string",
+                        "example": "Example Company GmbH"
+                    },
+                    "checked_at": {
+                        "description": "Timestamp of the last VAT check",
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2024-01-19T12:45:00Z"
+                    },
+                    "score": {
+                        "description": "Risk Score! 100 OK, 50 Could be fraud...",
+                        "type": "number",
+                        "format": "float",
+                        "example": 100
+                    },
+                    "breakdown": {
+                        "description": "Detailed breakdown of the score calculation",
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "example": "AI Name Comparison"
+                                },
+                                "step_type": {
+                                    "type": "string",
+                                    "example": "AiNameComparisonStep"
+                                },
+                                "score": {
+                                    "type": "integer",
+                                    "example": 25
+                                },
+                                "valid": {
+                                    "type": "boolean",
+                                    "example": true
+                                },
+                                "summary": {
+                                    "type": "string",
+                                    "example": "Company names match"
+                                },
+                                "code": {
+                                    "type": "string",
+                                    "example": "MATCH"
+                                },
+                                "details": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "notes": {
+                                    "type": "object"
+                                }
+                            },
+                            "type": "object"
+                        }
+                    }
+                },
+                "type": "object"
+            }
+        },
+        "securitySchemes": {
+            "ApiKeyAuth": {
+                "type": "apiKey",
+                "description": "API key required for all requests. Provide the key via the x-api-key header.",
+                "name": "x-api-key",
+                "in": "header"
+            },
+            "bearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+                "description": "JWT access token returned by /api/v1/login. Use as Authorization: Bearer <token>."
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Company",
+            "description": "API Endpoints for managing companies"
+        },
+        {
+            "name": "VAT",
+            "description": "Endpoints related to VAT operations"
+        },
+        {
+            "name": "Authentication",
+            "description": "Authentication"
+        },
+        {
+            "name": "Auth",
+            "description": "Auth"
+        }
+    ],
+    "security": [
+        {
+            "ApiKeyAuth": []
+        }
+    ]
+}

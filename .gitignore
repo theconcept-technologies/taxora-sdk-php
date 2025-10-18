@@ -1,0 +1,24 @@
+# Composer
+/vendor/
+composer.phar
+composer.lock
+
+# PHP development tools
+.php-cs-fixer.cache
+.phpunit.result.cache
+.phpunit.cache/
+.psalm/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage and cache
+/coverage/
+/cache/
+/build/
+/.psalm-cache/

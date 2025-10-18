@@ -1,0 +1,49 @@
+{
+  "name": "taxora/sdk-php",
+  "description": "Official PHP SDK for the Taxora VAT API (sandbox & production).",
+  "type": "library",
+  "license": "MIT",
+  "require": {
+    "php": "^8.3 || ^8.4",
+    "php-http/discovery": "^1.19",
+    "psr/http-client": "^1.0",
+    "psr/http-message": "^2.0",
+    "psr/http-factory": "^1.0",
+    "psr/simple-cache": "^3.0"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^12.0",
+    "vimeo/psalm": "^6.13",
+    "phpstan/phpstan": "^2.1",
+    "friendsofphp/php-cs-fixer": "^3.88",
+    "http-interop/http-factory-guzzle": "^1.2",
+    "guzzlehttp/guzzle": "^7.9 || ^8.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "Taxora\\Sdk\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Taxora\\Sdk\\Tests\\": "tests/"
+    }
+  },
+  "scripts": {
+    "test": [
+      "@php -r \"echo '▶ Running PHPUnit'.PHP_EOL;\"",
+      "XDEBUG_MODE=coverage php vendor/bin/phpunit",
+      "@php -r \"echo '▶ Running Psalm (no cache)'.PHP_EOL;\"",
+      "php -d xdebug.mode=off vendor/bin/psalm --no-cache"
+    ],
+    "psalm": "php -d xdebug.mode=off vendor/bin/psalm --no-cache",
+    "phpunit": "XDEBUG_MODE=coverage php vendor/bin/phpunit"
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true,
+  "config": {
+    "allow-plugins": {
+      "php-http/discovery": true
+    }
+  }
+}

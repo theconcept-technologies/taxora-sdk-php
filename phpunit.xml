@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/12.0/phpunit.xsd"
+        bootstrap="vendor/autoload.php"
+        colors="true"
+        cacheDirectory=".phpunit.cache"
+        executionOrder="depends,defects"
+        resolveDependencies="true"
+        beStrictAboutTestsThatDoNotTestAnything="true"
+        failOnRisky="true"
+        failOnWarning="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+
+    <groups>
+        <exclude>
+            <group>external</group>
+        </exclude>
+    </groups>
+
+    <coverage>
+        <report>
+            <clover outputFile="build/logs/clover.xml"/>
+            <html outputDirectory="build/coverage" lowUpperBound="50" highLowerBound="90"/>
+            <text outputFile="build/logs/coverage.txt" showOnlySummary="false"/>
+        </report>
+    </coverage>
+
+    <source>
+        <include>
+            <directory suffix=".php">src</directory>
+        </include>
+        <exclude>
+            <directory>vendor</directory>
+            <directory>resources</directory>
+            <directory>.github</directory>
+            <file>src/TaxoraClient.php</file>
+        </exclude>
+    </source>
+
+    <logging>
+        <junit outputFile="build/logs/junit.xml"/>
+        <teamcity outputFile="build/logs/teamcity.log"/>
+    </logging>
+
+    <php>
+        <!-- Make test runs deterministic and verbose by default -->
+        <ini name="error_reporting" value="-1"/>
+        <env name="TAXORA_ENV" value="sandbox"/>
+        <!-- Inject fake defaults for local runs; real keys should be set in CI secrets -->
+        <env name="TAXORA_API_KEY" value="test_api_key"/>
+        <env name="TAXORA_USERNAME" value="user@example.com"/>
+        <env name="TAXORA_PASSWORD" value="secret"/>
+    </php>
+</phpunit>
