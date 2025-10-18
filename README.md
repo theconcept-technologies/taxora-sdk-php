@@ -21,7 +21,7 @@ The **Taxora SDK** provides an elegant, PSR-compliant interface to the [Taxora A
 * ✅ PHP 8.3 and 8.4 ready
 
 > 🔒 The SDK itself is free to use, but a **Taxora API subscription** is required.
-> You can obtain your `x-api-key` from your [Taxora account dashboard](https://dashboard.taxora.io).
+> You can obtain your `x-api-key` from your [Taxora account developer settings](https://app.taxora.io).
 
 ---
 
