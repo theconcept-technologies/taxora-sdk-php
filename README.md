@@ -65,9 +65,9 @@ echo $vat->company_name; // Official company name
 // 3️⃣ Access company info
 $company = $client->company()->get();
 
-// 4️⃣ Export certificates
+// 4️⃣ Export certificates (returns a VatCertificateExport object)
 $export = $client->vat()->certificatesBulkExport('2024-01-01', '2024-12-31');
-$pdfZip = $client->vat()->downloadBulkExport($export['export_id']);
+$pdfZip = $client->vat()->downloadBulkExport($export->exportId);
 file_put_contents('certificates.zip', $pdfZip);
 ```
 
