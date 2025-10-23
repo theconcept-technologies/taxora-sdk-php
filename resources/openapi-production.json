@@ -15,14 +15,14 @@
         }
     ],
     "paths": {
-        "/api/v1/company": {
+        "/v1/company": {
             "get": {
                 "tags": [
                     "Company"
                 ],
                 "summary": "Get the authenticated user's company",
                 "description": "Returns the company information for the authenticated user",
-                "operationId": "41dd1c5c722f08c7a65e10dc84207302",
+                "operationId": "b39847b7ab3220d3697a58e9a4810b4f",
                 "responses": {
                     "200": {
                         "description": "Company retrieved successfully",
@@ -51,14 +51,14 @@
                 ]
             }
         },
-        "/api/v1/login": {
+        "/v1/login": {
             "post": {
                 "tags": [
                     "Authentication"
                 ],
                 "summary": "User Login",
                 "description": "Authenticates the user and returns an access token.",
-                "operationId": "05d536c846963ff3d47fe782fa7f5435",
+                "operationId": "8c0c5721bd4d6c49920dd516eaee6637",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -127,14 +127,14 @@
                 }
             }
         },
-        "/api/v1/refresh": {
+        "/v1/refresh": {
             "post": {
                 "tags": [
                     "Authentication"
                 ],
                 "summary": "Refresh Access Token",
                 "description": "Deletes the existing token and generates a new one.",
-                "operationId": "f8fd7e9a4976fc38726c0072c991c881",
+                "operationId": "994ecc43ada29d9ee73b66d721be1a5d",
                 "responses": {
                     "200": {
                         "description": "Successful token refresh",
@@ -173,14 +173,84 @@
                 ]
             }
         },
-        "/api/v1/auth/register": {
+        "/v1/company/api-user": {
+            "put": {
+                "tags": [
+                    "Company"
+                ],
+                "summary": "Create API user",
+                "description": "Create a new API user.\nThis endpoint is only accessible by users with the PERMISSION_MERCHANT_ADMIN permission.\nIt creates a user with USER_TYPE_API that can only interact with the API via token-based authentication.",
+                "operationId": "11fe0ac2feaf6bcb7b7bf7056920a9fd",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name",
+                                    "email",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "API User"
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "api.user@example.com"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "ChangeMe123!"
+                                    },
+                                    "environment": {
+                                        "description": "Target environment (default: LIVE)",
+                                        "type": "string",
+                                        "enum": [
+                                            "LIVE",
+                                            "SANDBOX"
+                                        ],
+                                        "example": "SANDBOX"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "API user created successfully"
+                    },
+                    "403": {
+                        "description": "User has no company"
+                    },
+                    "422": {
+                        "description": "Unable to resolve environment"
+                    },
+                    "500": {
+                        "description": "Server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/auth/register": {
             "post": {
                 "tags": [
                     "Auth"
                 ],
                 "summary": "Register a new user",
                 "description": "Register a new user with optional company information",
-                "operationId": "cc42accada9f853846228ceeea507302",
+                "operationId": "703b278ff8a2cc56f2be37baa3d1f258",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -262,14 +332,14 @@
                 }
             }
         },
-        "/api/v1/two-factor-authentication/status": {
+        "/v1/two-factor-authentication/status": {
             "get": {
                 "tags": [
                     "Authentication"
                 ],
                 "summary": "Get 2FA Status",
                 "description": "Returns the current status of two-factor authentication for the authenticated user.",
-                "operationId": "c219043cf7246f56528e4fcda6eaf16c",
+                "operationId": "6b2f65bbfe5c330bdfc4e8e2327bb5bf",
                 "responses": {
                     "200": {
                         "description": "Successful operation",
@@ -305,14 +375,14 @@
                 ]
             }
         },
-        "/api/v1/two-factor-authentication": {
+        "/v1/two-factor-authentication": {
             "post": {
                 "tags": [
                     "Authentication"
                 ],
                 "summary": "Enable 2FA",
                 "description": "Enables two-factor authentication for the authenticated user.",
-                "operationId": "242fe31b2402031a158ac9d424e44883",
+                "operationId": "94713acc84e5d758b160a1b838615766",
                 "responses": {
                     "200": {
                         "description": "2FA enabled successfully",
@@ -354,7 +424,7 @@
                 ],
                 "summary": "Disable 2FA",
                 "description": "Disables two-factor authentication for the authenticated user.",
-                "operationId": "270c1f45af6f4945f398cfffdc2a7ddc",
+                "operationId": "dd3f2286fc4a25fabfc6bc00074c156f",
                 "responses": {
                     "200": {
                         "description": "2FA disabled successfully"
@@ -371,14 +441,14 @@
                 ]
             }
         },
-        "/api/v1/two-factor-authentication/confirm": {
+        "/v1/two-factor-authentication/confirm": {
             "post": {
                 "tags": [
                     "Authentication"
                 ],
                 "summary": "Confirm 2FA",
                 "description": "Confirms two-factor authentication for the authenticated user.",
-                "operationId": "280b7514329c45a7b40623e334796b0a",
+                "operationId": "8bfce3c07b988d2fa6a2565e247f7d82",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -418,14 +488,14 @@
                 ]
             }
         },
-        "/api/v1/two-factor-authentication/recovery-codes": {
+        "/v1/two-factor-authentication/recovery-codes": {
             "post": {
                 "tags": [
                     "Authentication"
                 ],
                 "summary": "Generate New Recovery Codes",
                 "description": "Generates new recovery codes for the authenticated user.",
-                "operationId": "70c83d1451be05c5d0fbd3491f27e77b",
+                "operationId": "ed71b86eeb415d13b42b58714d6ad177",
                 "responses": {
                     "200": {
                         "description": "Recovery codes generated successfully",
@@ -461,14 +531,14 @@
                 ]
             }
         },
-        "/api/v1/vat/validate": {
+        "/v1/vat/validate": {
             "post": {
                 "tags": [
                     "VAT"
                 ],
                 "summary": "Validate a VAT UID",
                 "description": "Checks if a VAT UID is valid.",
-                "operationId": "d526a1e21e3ea5ab46bd0ab52942412e",
+                "operationId": "43a39536cf6714e12f99cf2910b92043",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -525,14 +595,14 @@
                 ]
             }
         },
-        "/api/v1/vat/validate-multiple": {
+        "/v1/vat/validate-multiple": {
             "post": {
                 "tags": [
                     "VAT"
                 ],
                 "summary": "Validate multiple VAT UIDs",
                 "description": "Checks if multiple VAT UIDs are valid and returns their validation status.",
-                "operationId": "92c4426e908bbe567f073f92d7ca918c",
+                "operationId": "8041f39590ae674006068ac6728a42ea",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -598,14 +668,14 @@
                 ]
             }
         },
-        "/api/v1/vat/validate-schema": {
+        "/v1/vat/validate-schema": {
             "post": {
                 "tags": [
                     "VAT"
                 ],
                 "summary": "Validate VAT UID Schema",
                 "description": "Validates if the given VAT UID follows the correct format and schema based on country-specific VAT rules.",
-                "operationId": "41e8dbbd2b28f16149e4f7583854f5b3",
+                "operationId": "0c6f5ab7ce400a008bcbbe256b230fa5",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -708,14 +778,14 @@
                 ]
             }
         },
-        "/api/v1/vat/state": {
+        "/v1/vat/state": {
             "post": {
                 "tags": [
                     "VAT"
                 ],
                 "summary": "Get the state of a VAT UID",
                 "description": "Retrieves the current state of a VAT UID.",
-                "operationId": "d0579a2c9933be1f97d28fc6021f7d0f",
+                "operationId": "c2d2868b5628ecc5ec3e4eb03642988c",
                 "parameters": [
                     {
                         "name": "vat_uid",
@@ -760,14 +830,14 @@
                 ]
             }
         },
-        "/api/v1/vat/history": {
+        "/v1/vat/history": {
             "post": {
                 "tags": [
                     "VAT"
                 ],
                 "summary": "Get VAT history",
                 "description": "Retrieves the history of a VAT UID.",
-                "operationId": "5a4ad50e256d77bcb7e4f68dcf17a19b",
+                "operationId": "56a36f5aba3cca9c80ade16dfbaf3afb",
                 "parameters": [
                     {
                         "name": "vat_uid",
@@ -803,14 +873,14 @@
                 ]
             }
         },
-        "/api/v1/vat/search": {
+        "/v1/vat/search": {
             "post": {
                 "tags": [
                     "VAT"
                 ],
                 "summary": "Search VAT records",
                 "description": "Find VAT records based on search filters.",
-                "operationId": "3d3ae2f42786da1f78b075cd31617cd6",
+                "operationId": "8b7fad4d7378d51885af890961d39f90",
                 "parameters": [
                     {
                         "name": "search",
@@ -856,7 +926,7 @@
                 ]
             }
         },
-        "/api/v1/vat/certificate": {
+        "/v1/vat/certificate": {
             "post": {
                 "tags": [
                     "VAT"
@@ -998,7 +1068,7 @@
                 ]
             }
         },
-        "/api/v1/vat/certificates/bulk-export": {
+        "/v1/vat/certificates/bulk-export": {
             "post": {
                 "tags": [
                     "VAT"
@@ -1149,7 +1219,7 @@
                 ]
             }
         },
-        "/api/v1/vat/certificates/download/{exportId}": {
+        "/v1/vat/certificates/download/{exportId}": {
             "get": {
                 "tags": [
                     "VAT"
@@ -1412,7 +1482,7 @@
                 "type": "http",
                 "scheme": "bearer",
                 "bearerFormat": "JWT",
-                "description": "JWT access token returned by /api/v1/login. Use as Authorization: Bearer <token>."
+                "description": "JWT access token returned by /v1/login. Use as Authorization: Bearer <token>."
             }
         }
     },

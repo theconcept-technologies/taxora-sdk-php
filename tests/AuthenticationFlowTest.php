@@ -56,13 +56,13 @@ final class AuthenticationFlowTest extends TestCase
 
         $refreshRequest = $http->requests[0];
         self::assertSame('POST', $refreshRequest->getMethod());
-        self::assertSame('https://sandbox.taxora.io/api/v1/refresh', (string) $refreshRequest->getUri());
+        self::assertSame('https://sandbox.taxora.io/v1/refresh', (string) $refreshRequest->getUri());
         self::assertSame(['test-key'], $refreshRequest->getHeader('x-api-key'));
         self::assertSame(['Bearer expired-token'], $refreshRequest->getHeader('Authorization'));
 
         $companyRequest = $http->requests[1];
         self::assertSame('GET', $companyRequest->getMethod());
-        self::assertSame('https://sandbox.taxora.io/api/v1/company', (string) $companyRequest->getUri());
+        self::assertSame('https://sandbox.taxora.io/v1/company', (string) $companyRequest->getUri());
         self::assertSame(['Bearer refreshed-token'], $companyRequest->getHeader('Authorization'));
     }
 
@@ -104,7 +104,7 @@ final class AuthenticationFlowTest extends TestCase
 
         $refreshRequest = $http->requests[1];
         self::assertSame('POST', $refreshRequest->getMethod());
-        self::assertSame('https://sandbox.taxora.io/api/v1/refresh', (string) $refreshRequest->getUri());
+        self::assertSame('https://sandbox.taxora.io/v1/refresh', (string) $refreshRequest->getUri());
         self::assertSame(['Bearer initial-token'], $refreshRequest->getHeader('Authorization'));
 
         $retryRequest = $http->requests[2];

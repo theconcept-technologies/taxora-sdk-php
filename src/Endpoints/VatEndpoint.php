@@ -174,7 +174,7 @@ final class VatEndpoint
 
     private function uri(string $path): string
     {
-        return sprintf('%s/api/%s%s', $this->baseUrl, $this->apiVersion->value, $path);
+        return sprintf('%s/%s%s', $this->baseUrl, $this->apiVersion->value, $path);
     }
 
     private function jsonGet(string $uri): array

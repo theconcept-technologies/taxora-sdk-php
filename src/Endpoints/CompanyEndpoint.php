@@ -35,7 +35,7 @@ final class CompanyEndpoint
     /** Returns your company context (raw array) */
     public function get(): array
     {
-        $uri = sprintf('%s/api/%s/company', $this->baseUrl, $this->apiVersion->value);
+        $uri = sprintf('%s/%s/company', $this->baseUrl, $this->apiVersion->value);
         $response = $this->send(fn() => $this->req->createRequest('GET', $uri));
 
         if ($response->getStatusCode() !== 200) {

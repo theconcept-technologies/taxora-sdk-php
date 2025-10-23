@@ -43,7 +43,7 @@ final class CompanyTest extends TestCase
         $request = $client->requests[0] ?? null;
         self::assertInstanceOf(RequestInterface::class, $request);
         self::assertSame('GET', $request->getMethod());
-        self::assertSame('https://sandbox.taxora.io/api/v1/company', (string) $request->getUri());
+        self::assertSame('https://sandbox.taxora.io/v1/company', (string) $request->getUri());
         self::assertSame(['api-key'], $request->getHeader('x-api-key'));
         self::assertSame(['Bearer token-abc'], $request->getHeader('Authorization'));
     }

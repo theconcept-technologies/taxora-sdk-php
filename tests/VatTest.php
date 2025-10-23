@@ -61,13 +61,13 @@ final class VatTest extends TestCase
                 ['vat_uid'=>'ATU11111111','state'=>'VALID'],
                 ['vat_uid'=>'ATU22222222','state'=>'INVALID'],
             ],
-            'links' => ['self'=>'https://api.taxora.io/api/v1/vat/history']
+            'links' => ['self'=>'https://api.taxora.io/v1/vat/history']
         ];
         $col = VatCollection::fromResponse($payload);
 
         self::assertCount(2, $col);
         self::assertSame('ATU11111111', $col->all()[0]->vat_uid);
-        self::assertSame('https://api.taxora.io/api/v1/vat/history', $col->self);
+        self::assertSame('https://api.taxora.io/v1/vat/history', $col->self);
     }
 
     public function testVatCollectionFromValidateMultipleArray(): void

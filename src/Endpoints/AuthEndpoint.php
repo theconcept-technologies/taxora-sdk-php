@@ -32,7 +32,7 @@ final class AuthEndpoint
     /** Perform login and persist the received token. */
     public function login(string $email, string $password, ?string $device = null): Token
     {
-        $uri = sprintf('%s/api/%s/login', $this->baseUrl, $this->apiVersion->value);
+        $uri = sprintf('%s/%s/login', $this->baseUrl, $this->apiVersion->value);
         $body = [
             'email' => $email,
             'password' => $password,
@@ -71,7 +71,7 @@ final class AuthEndpoint
     /** Refresh the token using the current bearer token. */
     public function refresh(): Token
     {
-        $uri = sprintf('%s/api/%s/refresh', $this->baseUrl, $this->apiVersion->value);
+        $uri = sprintf('%s/%s/refresh', $this->baseUrl, $this->apiVersion->value);
         $req = $this->req->createRequest('POST', $uri)
             ->withHeader('Content-Type', 'application/json');
 

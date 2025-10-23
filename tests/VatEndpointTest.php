@@ -56,7 +56,7 @@ final class VatEndpointTest extends TestCase
         self::assertCount(1, $http->requests);
         $request = $http->requests[0];
         self::assertSame('POST', $request->getMethod());
-        self::assertSame('/api/v1/vat/certificates/bulk-export', $request->getUri()->getPath());
+        self::assertSame('/v1/vat/certificates/bulk-export', $request->getUri()->getPath());
 
         $payload = json_decode((string) $request->getBody(), true);
         self::assertSame('2024-01-01', $payload['from_date']);
