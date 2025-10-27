@@ -61,6 +61,11 @@ $client->auth()->login('user@example.com', 'superSecret');
 $vat = $client->vat()->validate('ATU12345678', 'Example GmbH');
 echo $vat->state;        // VALID / INVALID
 echo $vat->company_name; // Official company name
+echo $vat->score;        // Overall confidence score (float)
+
+foreach ($vat->breakdown ?? [] as $step) {
+    echo $step->stepName.' gave '.$step->scoreContribution.PHP_EOL;
+}
 
 // 3️⃣ Access company info
 $company = $client->company()->get();
@@ -70,6 +75,8 @@ $export = $client->vat()->certificatesBulkExport('2024-01-01', '2024-12-31');
 $pdfZip = $client->vat()->downloadBulkExport($export->exportId);
 file_put_contents('certificates.zip', $pdfZip);
 ```
+
+`vat()->validate()` returns a `VatResource` object that includes the canonical VAT number, status, requested company name echo, and optional scoring data. The `score` reflects the overall confidence (higher is better), while `breakdown` provides an array of `ScoreBreakdown` objects describing every validation step, its score contribution, and any metadata (e.g. matched addresses or mismatched fields).
 
 Need to plug in your own PSR-18 client or PSR-17 factories (e.g. to add logging or retries)?
 Call the constructor directly or pass them as optional overrides to the factory:
@@ -111,11 +118,12 @@ Each endpoint handles:
 
 ## 📦 DTOs
 
-| Class           | Description                                                                                   |
-| --------------- | --------------------------------------------------------------------------------------------- |
-| `VatResource`   | Represents a single VAT validation result (fields: `uuid`, `vat_uid`, `state`, `score`, etc.) |
-| `VatCollection` | Iterable list of `VatResource` objects                                                        |
-| `Token`         | Auth token with expiry & type                                                                 |
+| Class             | Description                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| `VatResource`     | Represents a single VAT validation result (normalized VAT UID, state, score, breakdown, company data)    |
+| `ScoreBreakdown`  | Scoring fragment with validation step name, score contribution, and metadata context for the decision     |
+| `VatCollection`   | Iterable list of `VatResource` objects                                                                    |
+| `Token`           | Auth token with expiry & type                                                                             |
 
 Example:
 
@@ -184,6 +192,8 @@ CI runs on **PHP 8.3** and **8.4**, verifying:
 | ----------- | ------------------------------ |
 | Sandbox     | `https://sandbox.taxora.io/v1` |
 | Production  | `https://api.taxora.io/v1`     |
+
+Need sandbox sample data? Known VAT UIDs with deterministic responses live in `tests/Fixtures/SandboxVatFixtures.php`.
 
 Switch easily via the constructor:
 

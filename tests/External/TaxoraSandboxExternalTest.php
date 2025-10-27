@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Taxora\Sdk\Enums\Environment;
 use Taxora\Sdk\TaxoraClient;
+use Taxora\Sdk\TaxoraClientFactory;
 
 #[Group("external")]
 final class TaxoraSandboxExternalTest extends TestCase
@@ -36,11 +37,26 @@ final class TaxoraSandboxExternalTest extends TestCase
             environment: !empty(getenv('TAXORA_ENV')) ? Environment::tryFrom(getenv('TAXORA_ENV')) : Environment::SANDBOX
         );
 
-        $client->login($username, $password);
-        $company = $client->company()->get();
+        $client = TaxoraClientFactory::create($apiKey, environment: Environment::SANDBOX);
 
-        self::assertIsArray($company);
-        self::assertNotEmpty($company);
-        self::assertArrayHasKey('data', $company, 'Expected company payload to expose data key');
+        $loginResponse = $client->login($username, $password);
+        self::assertNotEmpty($loginResponse->accessToken);
+        self::assertFalse($loginResponse->isExpired());
+        $vatResponse = $client->vat()->validate('FR99345678901');
+        self::assertSame(\Taxora\Sdk\Enums\VatState::VALID, $vatResponse->state);
+        self::assertSame('FR99345678901', $vatResponse->vat_uid);
+        self::assertSame('FR', $vatResponse->country_code);
+        self::assertSame('Gamma Industrie SAS', $vatResponse->company_name);
+        self::assertSame('10 Rue de Rivoli', $vatResponse->company_address->street);
+        self::assertSame('75001', $vatResponse->company_address->postalCode);
+        self::assertSame('Paris', $vatResponse->company_address->city);
+
+        $historyResponse = $client->vat()->history();
+        self::assertNotEmpty($historyResponse->all());
+
+        $schemaResponse = $client->vat()->validateSchema('ATU11111111');
+        self::assertTrue($schemaResponse['success']);
+        self::assertTrue($schemaResponse['data']['valid']);
+        self::assertNotEmpty($schemaResponse['data']['message']);
     }
 }
