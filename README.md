@@ -59,7 +59,7 @@ $client->auth()->login('user@example.com', 'superSecret');
 
 // 2️⃣ Validate a VAT number
 $vat = $client->vat()->validate('ATU12345678', 'Example GmbH');
-echo $vat->state;        // VALID / INVALID
+echo $vat->state->value;        // valid / invalid
 echo $vat->company_name; // Official company name
 echo $vat->score;        // Overall confidence score (float)
 
