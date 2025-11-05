@@ -121,7 +121,7 @@ final readonly class VatResource
                 $out[] = $v;
             }
         }
-        return $out === [] ? null : array_values($out);
+        return !empty($out) ? $out : null;
     }
 
     private static function mapState(mixed $state): ?VatState
