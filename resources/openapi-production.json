@@ -15,14 +15,14 @@
         }
     ],
     "paths": {
-        "/v1/company": {
+        "/v1/analytics": {
             "get": {
                 "tags": [
                     "Company"
                 ],
-                "summary": "Get the authenticated user's company",
-                "description": "Returns the company information for the authenticated user",
-                "operationId": "b39847b7ab3220d3697a58e9a4810b4f",
+                "summary": "Get analytics for the authenticated user's company",
+                "description": "Returns analytics data for the authenticated user's company",
+                "operationId": "6414d44e304a7e4fd815f0519f6ac12d",
                 "responses": {
                     "200": {
                         "description": "Company retrieved successfully",
@@ -173,38 +173,128 @@
                 ]
             }
         },
-        "/v1/company/api-user": {
-            "put": {
+        "/v1/company": {
+            "get": {
                 "tags": [
                     "Company"
                 ],
-                "summary": "Create API user",
-                "description": "Create a new API user.\nThis endpoint is only accessible by users with the PERMISSION_MERCHANT_ADMIN permission.\nIt creates a user with USER_TYPE_API that can only interact with the API via token-based authentication.",
-                "operationId": "11fe0ac2feaf6bcb7b7bf7056920a9fd",
+                "summary": "Get the authenticated user's company",
+                "description": "Returns the company information for the authenticated user",
+                "operationId": "3d4a674ad6e3a7edcfb85a62eae8016c",
+                "responses": {
+                    "200": {
+                        "description": "Company retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authorized"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Company"
+                ],
+                "summary": "Update a company",
+                "description": "Updates an existing company",
+                "operationId": "de549d7bcb0a00698c7e775d597cac74",
                 "requestBody": {
                     "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
-                                "required": [
-                                    "name",
-                                    "email",
-                                    "password"
-                                ],
+                                "properties": {
+                                    "id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Updated Company Name"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Company updated successfully"
+                    },
+                    "422": {
+                        "description": "Validation failed"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Company"
+                ],
+                "summary": "Deactivate company account and delete allowable data",
+                "description": "Deactivates all auth access, deletes deletable data, and preserves subscriptions, orders, journals, and VAT requests.",
+                "operationId": "68bfaa3178cfc36ea473de4fc5a977b5",
+                "responses": {
+                    "200": {
+                        "description": "Company deactivated"
+                    },
+                    "401": {
+                        "description": "Not authorized"
+                    },
+                    "403": {
+                        "description": "Not enough permissions"
+                    },
+                    "500": {
+                        "description": "Server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/company/api-key": {
+            "put": {
+                "tags": [
+                    "Company"
+                ],
+                "summary": "Create company API key",
+                "operationId": "a22923e4648772bd55a5f37d6f525748",
+                "requestBody": {
+                    "required": false,
+                    "content": {
+                        "application/json": {
+                            "schema": {
                                 "properties": {
                                     "name": {
                                         "type": "string",
-                                        "example": "API User"
-                                    },
-                                    "email": {
-                                        "type": "string",
-                                        "format": "email",
-                                        "example": "api.user@example.com"
-                                    },
-                                    "password": {
-                                        "type": "string",
-                                        "format": "password",
-                                        "example": "ChangeMe123!"
+                                        "example": "Staging Key"
                                     },
                                     "environment": {
                                         "description": "Target environment (default: LIVE)",
@@ -223,10 +313,10 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "API user created successfully"
+                        "description": "API key created"
                     },
-                    "403": {
-                        "description": "User has no company"
+                    "401": {
+                        "description": "Not authorized"
                     },
                     "422": {
                         "description": "Unable to resolve environment"
@@ -243,128 +333,36 @@
                 ]
             }
         },
-        "/v1/auth/register": {
-            "post": {
-                "tags": [
-                    "Auth"
-                ],
-                "summary": "Register a new user",
-                "description": "Register a new user with optional company information",
-                "operationId": "703b278ff8a2cc56f2be37baa3d1f258",
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "properties": {
-                                    "name": {
-                                        "type": "string",
-                                        "example": "John Doe"
-                                    },
-                                    "email": {
-                                        "type": "string",
-                                        "format": "email",
-                                        "example": "john@example.com"
-                                    },
-                                    "password": {
-                                        "type": "string",
-                                        "format": "password",
-                                        "example": "password123"
-                                    },
-                                    "terms": {
-                                        "type": "boolean",
-                                        "example": true
-                                    },
-                                    "image_url": {
-                                        "type": "string",
-                                        "example": "https://example.com/avatar.jpg"
-                                    },
-                                    "company": {
-                                        "properties": {
-                                            "name": {
-                                                "type": "string",
-                                                "example": "Company Name"
-                                            },
-                                            "vat_uid": {
-                                                "type": "string",
-                                                "example": "VAT123456"
-                                            },
-                                            "address_line_1": {
-                                                "type": "string",
-                                                "example": "123 Main St"
-                                            },
-                                            "street": {
-                                                "type": "string",
-                                                "example": "Main St"
-                                            },
-                                            "zip_code": {
-                                                "type": "string",
-                                                "example": "12345"
-                                            },
-                                            "city": {
-                                                "type": "string",
-                                                "example": "City"
-                                            },
-                                            "phone_number": {
-                                                "type": "string",
-                                                "example": "+1234567890"
-                                            },
-                                            "country_code": {
-                                                "type": "string",
-                                                "example": "US"
-                                            }
-                                        },
-                                        "type": "object"
-                                    }
-                                },
-                                "type": "object"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "User registered successfully"
-                    },
-                    "422": {
-                        "description": "Validation failed"
-                    }
-                }
-            }
-        },
-        "/v1/two-factor-authentication/status": {
+        "/v1/company/api-requests": {
             "get": {
                 "tags": [
-                    "Authentication"
+                    "Company"
                 ],
-                "summary": "Get 2FA Status",
-                "description": "Returns the current status of two-factor authentication for the authenticated user.",
-                "operationId": "6b2f65bbfe5c330bdfc4e8e2327bb5bf",
+                "summary": "Get API requests for the authenticated user's company",
+                "description": "Retrieves all API requests",
+                "operationId": "c2f2b40b9cba7309aab870b66f88ee0b",
+                "parameters": [
+                    {
+                        "name": "environment",
+                        "in": "query",
+                        "description": "Filter by environment (default: LIVE)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "LIVE",
+                                "SANDBOX"
+                            ],
+                            "example": "SANDBOX"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "Successful operation",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "enabled": {
-                                            "description": "Whether 2FA is enabled",
-                                            "type": "boolean",
-                                            "example": true
-                                        },
-                                        "confirmed": {
-                                            "description": "Whether 2FA is confirmed",
-                                            "type": "boolean",
-                                            "example": true
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
+                        "description": "API requests retrieved successfully"
                     },
                     "401": {
-                        "description": "Unauthorized"
+                        "description": "Not authorized"
                     }
                 },
                 "security": [
@@ -375,62 +373,35 @@
                 ]
             }
         },
-        "/v1/two-factor-authentication": {
-            "post": {
+        "/v1/company/current-api-group": {
+            "get": {
                 "tags": [
-                    "Authentication"
+                    "Company"
                 ],
-                "summary": "Enable 2FA",
-                "description": "Enables two-factor authentication for the authenticated user.",
-                "operationId": "94713acc84e5d758b160a1b838615766",
-                "responses": {
-                    "200": {
-                        "description": "2FA enabled successfully",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "qr_code": {
-                                            "description": "QR code SVG for Google Authenticator",
-                                            "type": "string"
-                                        },
-                                        "recovery_codes": {
-                                            "description": "Recovery codes",
-                                            "type": "array",
-                                            "items": {
-                                                "type": "string"
-                                            }
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized"
-                    }
-                },
-                "security": [
+                "summary": "Get current API request group",
+                "operationId": "2ce5991ac2d2f1808176dd7d6f16621c",
+                "parameters": [
                     {
-                        "bearerAuth": [],
-                        "ApiKeyAuth": []
+                        "name": "environment",
+                        "in": "query",
+                        "description": "Filter by environment (default: LIVE)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "LIVE",
+                                "SANDBOX"
+                            ],
+                            "example": "SANDBOX"
+                        }
                     }
-                ]
-            },
-            "delete": {
-                "tags": [
-                    "Authentication"
                 ],
-                "summary": "Disable 2FA",
-                "description": "Disables two-factor authentication for the authenticated user.",
-                "operationId": "dd3f2286fc4a25fabfc6bc00074c156f",
                 "responses": {
                     "200": {
-                        "description": "2FA disabled successfully"
+                        "description": "Current API request group retrieved"
                     },
                     "401": {
-                        "description": "Unauthorized"
+                        "description": "Not authorized"
                     }
                 },
                 "security": [
@@ -441,27 +412,103 @@
                 ]
             }
         },
-        "/v1/two-factor-authentication/confirm": {
-            "post": {
+        "/v1/company/users": {
+            "get": {
                 "tags": [
-                    "Authentication"
+                    "Company"
                 ],
-                "summary": "Confirm 2FA",
-                "description": "Confirms two-factor authentication for the authenticated user.",
-                "operationId": "8bfce3c07b988d2fa6a2565e247f7d82",
+                "summary": "List users of the current company",
+                "description": "Returns all users that belong to the authenticated user's company. Requires Merchant Admin or Readonly permissions.",
+                "operationId": "7b55c9dbd326a6a03879bfba58625f80",
+                "responses": {
+                    "200": {
+                        "description": "Users retrieved successfully"
+                    },
+                    "401": {
+                        "description": "Not authorized"
+                    },
+                    "403": {
+                        "description": "Not enough permissions"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/company/user": {
+            "put": {
+                "tags": [
+                    "Company"
+                ],
+                "summary": "Create a new user within the current company",
+                "description": "Creates an AUTH type user in the current company and optionally assigns roles. Only Merchant Admins can create users.",
+                "operationId": "89bc5ffbf3e801991d119f6bd9db029e",
                 "requestBody": {
                     "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
                                 "required": [
-                                    "code"
+                                    "email",
+                                    "password",
+                                    "password_confirmation"
                                 ],
                                 "properties": {
-                                    "code": {
-                                        "description": "2FA verification code",
+                                    "name": {
                                         "type": "string",
-                                        "example": "123456"
+                                        "example": "Jane Doe"
+                                    },
+                                    "firstName": {
+                                        "type": "string",
+                                        "example": "Jane"
+                                    },
+                                    "lastName": {
+                                        "type": "string",
+                                        "example": "Doe"
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "jane@company.com"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "StrongP@ssw0rd"
+                                    },
+                                    "password_confirmation": {
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "StrongP@ssw0rd"
+                                    },
+                                    "state": {
+                                        "description": "User state; defaults to 'active'",
+                                        "type": "string",
+                                        "example": "active"
+                                    },
+                                    "roles": {
+                                        "description": "List of role identifiers to assign. Each item can be a role ID (integer) or a role name (string), e.g. 'backend-merchant-admin'.",
+                                        "type": "array",
+                                        "items": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                {
+                                                    "type": "string",
+                                                    "example": "backend-merchant-admin"
+                                                }
+                                            ]
+                                        },
+                                        "example": [
+                                            "backend-merchant-admin",
+                                            2
+                                        ]
                                     }
                                 },
                                 "type": "object"
@@ -470,57 +517,17 @@
                     }
                 },
                 "responses": {
-                    "200": {
-                        "description": "2FA confirmed successfully"
+                    "201": {
+                        "description": "User created successfully"
                     },
                     "401": {
-                        "description": "Unauthorized"
+                        "description": "Not authorized"
+                    },
+                    "403": {
+                        "description": "Not enough permissions"
                     },
                     "422": {
-                        "description": "Invalid code"
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": [],
-                        "ApiKeyAuth": []
-                    }
-                ]
-            }
-        },
-        "/v1/two-factor-authentication/recovery-codes": {
-            "post": {
-                "tags": [
-                    "Authentication"
-                ],
-                "summary": "Generate New Recovery Codes",
-                "description": "Generates new recovery codes for the authenticated user.",
-                "operationId": "ed71b86eeb415d13b42b58714d6ad177",
-                "responses": {
-                    "200": {
-                        "description": "Recovery codes generated successfully",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "recovery_codes": {
-                                            "description": "New recovery codes",
-                                            "type": "array",
-                                            "items": {
-                                                "type": "string"
-                                            }
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized"
-                    },
-                    "422": {
-                        "description": "2FA not enabled"
+                        "description": "Validation failed"
                     }
                 },
                 "security": [
@@ -863,6 +870,78 @@
                     },
                     "500": {
                         "description": "Internal Server Error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/vat/history/{uuid}": {
+            "get": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Get VAT history detail",
+                "description": "Retrieves a single VAT history entry by its UUID. Supports fetching from sandbox when environment is SANDBOX.",
+                "operationId": "49791e9a7d381291252c94b3a2101f59",
+                "parameters": [
+                    {
+                        "name": "uuid",
+                        "in": "path",
+                        "description": "UUID of the VAT history entry",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "name": "environment",
+                        "in": "query",
+                        "description": "Select the environment to read from. Defaults to LIVE.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "LIVE",
+                                "SANDBOX",
+                                "DEV"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "VAT history entry retrieved",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/VatResource"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authorized"
+                    },
+                    "404": {
+                        "description": "History entry not found"
+                    },
+                    "503": {
+                        "description": "Sandbox not configured"
                     }
                 },
                 "security": [
@@ -1347,10 +1426,201 @@
                     }
                 ]
             }
+        },
+        "/v1/vat/verify/{uuid}": {
+            "get": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Verify a VAT certificate",
+                "description": "Validates the verification token and returns the VAT request data associated with the certificate UUID.",
+                "operationId": "1f84d38d186ec9e8c612b179dc15ae3b",
+                "parameters": [
+                    {
+                        "name": "uuid",
+                        "in": "path",
+                        "description": "UUID of the VAT request history record",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "name": "token",
+                        "in": "query",
+                        "description": "HMAC verification token from the QR code",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Verification successful",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/VatResource"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error"
+                    },
+                    "403": {
+                        "description": "Invalid verification token"
+                    },
+                    "404": {
+                        "description": "VAT verification record not found"
+                    }
+                }
+            }
         }
     },
     "components": {
         "schemas": {
+            "UserResource": {
+                "title": "User Resource",
+                "description": "Authenticated user resource with permissions",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "uuid": {
+                        "type": "string",
+                        "format": "uuid",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "company_uuid": {
+                        "type": "string",
+                        "format": "uuid",
+                        "nullable": true
+                    },
+                    "company": {
+                        "type": "object",
+                        "nullable": true
+                    },
+                    "stripe_id": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "pm_type": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "pm_last_four": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "trial_ends_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "John Doe"
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "example": "john@example.com"
+                    },
+                    "state": {
+                        "type": "string",
+                        "example": "active"
+                    },
+                    "type": {
+                        "type": "string",
+                        "example": "default"
+                    },
+                    "email_verified_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "current_team_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "permissions": {
+                        "description": "List of permissions assigned to the user",
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
+                    "avatar_url": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "profile": {
+                        "type": "object"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "type": "object"
+            },
+            "VatSandboxTestData": {
+                "title": "Sandbox VAT Test Data",
+                "description": "Static VAT UIDs available in sandbox and development environments for testing integration flows.",
+                "properties": {
+                    "valid_vat_uids": {
+                        "description": "VAT numbers that always return a valid response in sandbox/development mode.",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "example": [
+                            "ATU12345678",
+                            "DE123456789",
+                            "FR99345678901",
+                            "IT12398765432",
+                            "GB999999973"
+                        ]
+                    },
+                    "invalid_vat_uids": {
+                        "description": "VAT numbers that always return an invalid response in sandbox/development mode.",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "example": [
+                            "ATU99999999",
+                            "DE000000000",
+                            "FR00000000000",
+                            "IT00000000000",
+                            "GB000000000"
+                        ]
+                    },
+                    "notes": {
+                        "description": "Additional guidance for consumers using the sandbox test UIDs.",
+                        "type": "string",
+                        "example": "Use these VAT numbers when calling /v1/vat/validate or /v1/vat/validate-multiple in sandbox or development environments to receive deterministic mock responses."
+                    }
+                },
+                "type": "object"
+            },
             "VatCollection": {
                 "title": "VAT Collection",
                 "description": "A collection of VAT records",
@@ -1408,16 +1678,40 @@
                         "type": "string",
                         "example": "Musterstraße 12, 1010 Wien, Austria"
                     },
-                    "requested_company_name": {
-                        "description": "The company name that was provided during the VAT validation request",
+                    "provider": {
+                        "description": "Upstream provider used to process the VAT request when available",
                         "type": "string",
-                        "example": "Example Company GmbH"
+                        "example": "vies",
+                        "nullable": true
+                    },
+                    "used_providers": {
+                        "description": "Collection of upstream providers that participated in the validation run",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "example": [
+                            "fon",
+                            "vies"
+                        ],
+                        "nullable": true
+                    },
+                    "requested_company_name": {
+                        "description": "Company name provided during the VAT validation request when recorded",
+                        "type": "string",
+                        "example": "Example Company GmbH",
+                        "nullable": true
                     },
                     "checked_at": {
                         "description": "Timestamp of the last VAT check",
                         "type": "string",
                         "format": "date-time",
                         "example": "2024-01-19T12:45:00Z"
+                    },
+                    "environment": {
+                        "description": "Environment where the VAT validation was executed (e.g. LIVE or SANDBOX)",
+                        "type": "string",
+                        "example": "LIVE"
                     },
                     "score": {
                         "description": "Risk Score! 100 OK, 50 Could be fraud...",
@@ -1466,6 +1760,18 @@
                             },
                             "type": "object"
                         }
+                    },
+                    "provider_vat_state": {
+                        "description": "Latest VAT state reported by the upstream provider when available",
+                        "type": "string",
+                        "example": "VALID",
+                        "nullable": true
+                    },
+                    "provider_note": {
+                        "description": "Explanatory note included when the provider state differs from the validation result",
+                        "type": "string",
+                        "example": "Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).",
+                        "nullable": true
                     }
                 },
                 "type": "object"
@@ -1493,15 +1799,11 @@
         },
         {
             "name": "VAT",
-            "description": "Endpoints related to VAT operations"
+            "description": "Endpoints related to VAT operations. Sandbox & development environment users can reference the VatSandboxTestData schema for ready-to-use test VAT UIDs."
         },
         {
             "name": "Authentication",
             "description": "Authentication"
-        },
-        {
-            "name": "Auth",
-            "description": "Auth"
         }
     ],
     "security": [

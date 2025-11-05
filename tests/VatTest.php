@@ -35,6 +35,11 @@ final class VatTest extends TestCase
             'breakdown' => [
                 ['type' => 'AI Name Comparison', 'score' => 25, 'valid' => true, 'summary' => 'Company names match', 'code' => 'MATCH', 'details' => ['ok']],
             ],
+            'environment' => 'LIVE',
+            'provider' => 'vies',
+            'used_providers' => ['fon', 'vies'],
+            'provider_vat_state' => 'VALID',
+            'provider_note' => 'Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).',
         ];
         $vo = VatResource::fromArray($data);
 
@@ -55,6 +60,12 @@ final class VatTest extends TestCase
         self::assertSame('AI Name Comparison', $vo->breakdown[0]->stepName);
         self::assertSame(25.0, $vo->breakdown[0]->scoreContribution);
         self::assertSame(['valid' => true, 'summary' => 'Company names match', 'code' => 'MATCH', 'details' => ['ok']], $vo->breakdown[0]->metadata);
+        // New optional upstream provider fields
+        self::assertSame('LIVE', $vo->environment);
+        self::assertSame('vies', $vo->provider);
+        self::assertSame(['fon', 'vies'], $vo->used_providers);
+        self::assertSame('VALID', $vo->provider_vat_state);
+        self::assertSame('Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).', $vo->provider_note);
     }
 
     public function testVatCollectionFromHistoryResponse(): void

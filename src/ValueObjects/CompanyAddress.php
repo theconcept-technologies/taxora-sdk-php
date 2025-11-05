@@ -109,8 +109,23 @@ final readonly class CompanyAddress
         $state       = self::extractString($normalized, 'state');
         $country     = self::extractString($normalized, 'country');
 
-        if ($fullAddress === null && $raw !== null) {
-            $fullAddress = $raw;
+        if ($fullAddress !== null) {
+            $fullAddress = trim(preg_replace('/\s+/', ' ', str_replace(["\r", "\n"], ' ', $fullAddress)) ?? '');
+            if ($fullAddress === '') {
+                $fullAddress = null;
+            }
+        }
+
+        if ($fullAddress === null) {
+            $location = trim(trim($postalCode ?? '') . ' ' . trim($city ?? ''));
+            $parts = [];
+            foreach ([$name, $street, $location !== '' ? $location : null, $state, $country] as $part) {
+                $part = is_string($part) ? trim($part) : null;
+                if ($part !== null && $part !== '') {
+                    $parts[] = $part;
+                }
+            }
+            $fullAddress = $parts !== [] ? implode(', ', $parts) : null;
         }
 
         $computedRaw = $raw ?? self::encodeJson($normalized);

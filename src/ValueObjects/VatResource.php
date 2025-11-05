@@ -25,6 +25,12 @@ final readonly class VatResource
         public ?float $score,
         /** @var ScoreBreakdown[]|null */
         public ?array $breakdown,
+        public ?string $environment = null,
+        public ?string $provider = null,
+        /** @var string[]|null */
+        public ?array $used_providers = null,
+        public ?string $provider_vat_state = null,
+        public ?string $provider_note = null,
     ) {
     }
 
@@ -44,6 +50,11 @@ final readonly class VatResource
             checked_at: isset($data['checked_at']) ? new \DateTimeImmutable($data['checked_at']) : null,
             score: isset($data['score']) ? (float)$data['score'] : null,
             breakdown: self::hydrateBreakdown($data['breakdown'] ?? null),
+            environment: isset($data['environment']) && is_string($data['environment']) ? $data['environment'] : null,
+            provider: isset($data['provider']) && is_string($data['provider']) ? $data['provider'] : null,
+            used_providers: self::sanitizeStringArray($data['used_providers'] ?? null),
+            provider_vat_state: isset($data['provider_vat_state']) && is_string($data['provider_vat_state']) ? $data['provider_vat_state'] : null,
+            provider_note: isset($data['provider_note']) && is_string($data['provider_note']) ? $data['provider_note'] : null,
         );
     }
 
@@ -83,7 +94,34 @@ final readonly class VatResource
             'breakdown'               => $this->breakdown === null
                 ? null
                 : array_map(static fn (ScoreBreakdown $item) => $item->toArray(), $this->breakdown),
+            'environment'             => $this->environment,
+            'provider'                => $this->provider,
+            'used_providers'          => $this->used_providers,
+            'provider_vat_state'      => $this->provider_vat_state,
+            'provider_note'           => $this->provider_note,
         ];
+    }
+
+    /**
+     * @param mixed $values
+     * @return string[]|null
+     */
+    private static function sanitizeStringArray(mixed $values): ?array
+    {
+        if (is_string($values) && json_validate($values)) {
+            return json_decode($values, true);
+        }
+
+        if (!is_array($values)) {
+            return null;
+        }
+        $out = [];
+        foreach ($values as $v) {
+            if (is_string($v) && $v !== '') {
+                $out[] = $v;
+            }
+        }
+        return $out === [] ? null : array_values($out);
     }
 
     private static function mapState(mixed $state): ?VatState
@@ -104,5 +142,23 @@ final readonly class VatResource
         }
 
         return null;
+    }
+
+    /**
+     * Build a link to the Taxora app VAT history entry for this resource.
+     * Always uses the production app host (app.taxora.io) and switches path by environment.
+     * - LIVE (default) for production or when missing
+     * - SANDBOX for sandbox
+     */
+    public function getBackendLink(): ?string
+    {
+        if ($this->uuid === null || $this->uuid === '') {
+            return null;
+        }
+
+        $envRaw = is_string($this->environment) ? strtoupper(trim($this->environment)) : null;
+        $envSegment = $envRaw === 'SANDBOX' ? 'SANDBOX' : 'LIVE';
+
+        return sprintf('https://app.taxora.io/vat-history/%s/%s', $envSegment, $this->uuid);
     }
 }

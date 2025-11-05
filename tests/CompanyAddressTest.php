@@ -19,6 +19,7 @@ final class CompanyAddressTest extends TestCase
         self::assertSame('Ludersdorf-Wilfersdorf', $address->city);
         self::assertNull($address->state);
         self::assertSame('AT', $address->country);
+        self::assertSame('Weigl Martin, Wilfersdorf, 8200 Ludersdorf-Wilfersdorf, AT', $address->fullAddress);
         self::assertSame($json, $address->raw);
     }
 
@@ -29,7 +30,7 @@ final class CompanyAddressTest extends TestCase
         $address = CompanyAddress::from($json);
 
         self::assertNotNull($address);
-        self::assertSame("GALLERIA SAN FEDERICO 16 \n10121 TORINO TO", $address->fullAddress);
+        self::assertSame('GALLERIA SAN FEDERICO 16 10121 TORINO TO', $address->fullAddress);
         self::assertSame($json, $address->raw);
     }
 

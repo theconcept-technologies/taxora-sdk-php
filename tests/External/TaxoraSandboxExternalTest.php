@@ -7,6 +7,7 @@ use Http\Factory\Guzzle\StreamFactory;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Taxora\Sdk\Enums\Environment;
+use Taxora\Sdk\Enums\VatState;
 use Taxora\Sdk\TaxoraClient;
 use Taxora\Sdk\TaxoraClientFactory;
 
@@ -43,13 +44,18 @@ final class TaxoraSandboxExternalTest extends TestCase
         self::assertNotEmpty($loginResponse->accessToken);
         self::assertFalse($loginResponse->isExpired());
         $vatResponse = $client->vat()->validate('FR99345678901');
-        self::assertSame(\Taxora\Sdk\Enums\VatState::VALID, $vatResponse->state);
+        self::assertSame(VatState::VALID, $vatResponse->state);
         self::assertSame('FR99345678901', $vatResponse->vat_uid);
         self::assertSame('FR', $vatResponse->country_code);
         self::assertSame('Gamma Industrie SAS', $vatResponse->company_name);
         self::assertSame('10 Rue de Rivoli', $vatResponse->company_address->street);
         self::assertSame('75001', $vatResponse->company_address->postalCode);
         self::assertSame('Paris', $vatResponse->company_address->city);
+        self::assertSame('SANDBOX', $vatResponse->environment);
+        self::assertSame(sprintf('https://app.taxora.io/vat-history/%s/%s', $vatResponse->environment, $vatResponse->uuid), $vatResponse->getBackendLink());
+        self::assertEquals(['sandbox'], $vatResponse->used_providers);
+        self::assertSame('sandbox', $vatResponse->provider);
+        self::assertSame(VatState::VALID->value, $vatResponse->provider_vat_state);
 
         $historyResponse = $client->vat()->history();
         self::assertNotEmpty($historyResponse->all());
