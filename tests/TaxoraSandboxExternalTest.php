@@ -30,7 +30,7 @@ final class TaxoraSandboxExternalTest extends TestCase
         self::assertNotEmpty($loginResponse->accessToken);
         self::assertFalse($loginResponse->isExpired());
 
-        $client->loginWithClientId('client_123', 'client-secret', device: 'integration-box');
+        $loginResponse = $client->loginWithClientId('client_123', 'client-secret', device: 'integration-box');
         self::assertNotEmpty($loginResponse->accessToken);
         self::assertFalse($loginResponse->isExpired());
 
