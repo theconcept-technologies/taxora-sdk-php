@@ -1,4 +1,4 @@
-<p align="center">
+<p>
   <img src="https://taxora.io/assets/logo/taxora_logo.svg" alt="Taxora Logo" width="220"/>
 </p>
 
@@ -142,6 +142,14 @@ print_r($dto->toArray());
    $client->auth()->login('email', 'password', device: 'my-server-01');
    // Passing device is optional; omitted value falls back to a generated host-based identifier.
    ```
+
+   Need to authenticate with a technical `client_id` instead of an email?
+
+   ```php
+   $client->auth()->loginWithClientId('client_abc123', 'client-secret', device: 'integration-box');
+   ```
+
+   > Advanced: you can still pass `loginIdentifier: LoginIdentifier::CLIENT_ID` into `login()` if you prefer an explicit enum instead of the helper.
 
    → Stores and returns a `Token` DTO (valid for ~3600 seconds).
 

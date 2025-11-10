@@ -8,6 +8,7 @@ use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Taxora\Sdk\Enums\ApiVersion;
+use Taxora\Sdk\Enums\LoginIdentifier;
 use Taxora\Sdk\Exceptions\AuthenticationException;
 use Taxora\Sdk\Exceptions\HttpException;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
@@ -30,11 +31,15 @@ final class AuthEndpoint
     }
 
     /** Perform login and persist the received token. */
-    public function login(string $email, string $password, ?string $device = null): Token
-    {
+    public function login(
+        string $email,
+        string $password,
+        ?string $device = null,
+        LoginIdentifier $loginIdentifier = LoginIdentifier::EMAIL
+    ): Token {
         $uri = sprintf('%s/%s/login', $this->baseUrl, $this->apiVersion->value);
         $body = [
-            'email' => $email,
+            $loginIdentifier->value => $email,
             'password' => $password,
             'device_name' => $this->resolveDevice($device),
         ];
@@ -64,6 +69,11 @@ final class AuthEndpoint
         $this->store->set($token);
 
         return $token;
+    }
+
+    public function loginWithClientId(string $clientId, string $password, ?string $device = null): Token
+    {
+        return $this->login($clientId, $password, $device, LoginIdentifier::CLIENT_ID);
     }
 
     private static ?string $defaultDeviceId = null;

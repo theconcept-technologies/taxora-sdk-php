@@ -65,18 +65,22 @@
                         "application/json": {
                             "schema": {
                                 "required": [
-                                    "email",
                                     "password"
                                 ],
                                 "properties": {
                                     "email": {
-                                        "description": "User email address",
+                                        "description": "User email address. Required when client_id is not provided.",
                                         "type": "string",
                                         "format": "email",
                                         "example": "user@example.com"
                                     },
+                                    "client_id": {
+                                        "description": "API user identifier. Required when email is not provided.",
+                                        "type": "string",
+                                        "example": "client_abc123"
+                                    },
                                     "password": {
-                                        "description": "User password",
+                                        "description": "User password or client secret",
                                         "type": "string",
                                         "format": "password",
                                         "example": "password123"
@@ -1537,7 +1541,13 @@
                     "email": {
                         "type": "string",
                         "format": "email",
-                        "example": "john@example.com"
+                        "example": "john@example.com",
+                        "nullable": true
+                    },
+                    "client_id": {
+                        "type": "string",
+                        "example": "client_abc123",
+                        "nullable": true
                     },
                     "state": {
                         "type": "string",

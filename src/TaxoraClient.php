@@ -11,6 +11,7 @@ use Taxora\Sdk\Endpoints\AuthEndpoint;
 use Taxora\Sdk\Endpoints\CompanyEndpoint;
 use Taxora\Sdk\Endpoints\VatEndpoint;
 use Taxora\Sdk\Enums\ApiVersion;
+use Taxora\Sdk\Enums\LoginIdentifier;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
 use Taxora\Sdk\Http\TokenStorageInterface;
@@ -51,9 +52,18 @@ final class TaxoraClient
     }
 
     /** -------- AUTH -------- */
-    public function login(string $email, string $password, ?string $device = null): Http\Token
+    public function login(
+        string $email,
+        string $password,
+        ?string $device = null,
+        LoginIdentifier $loginIdentifier = LoginIdentifier::EMAIL
+    ): Http\Token {
+        return $this->auth()->login($email, $password, $device, $loginIdentifier);
+    }
+
+    public function loginWithClientId(string $clientId, string $password, ?string $device = null): Http\Token
     {
-        return $this->auth()->login($email, $password, $device);
+        return $this->auth()->loginWithClientId($clientId, $password, $device);
     }
 
     public function refresh(): Http\Token

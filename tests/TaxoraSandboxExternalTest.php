@@ -1,14 +1,10 @@
 <?php
 declare(strict_types=1);
 
-use GuzzleHttp\Client;
-use Http\Factory\Guzzle\RequestFactory;
-use Http\Factory\Guzzle\StreamFactory;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Taxora\Sdk\Enums\Environment;
 use Taxora\Sdk\Enums\VatState;
-use Taxora\Sdk\TaxoraClient;
 use Taxora\Sdk\TaxoraClientFactory;
 
 #[Group("external")]
@@ -28,21 +24,16 @@ final class TaxoraSandboxExternalTest extends TestCase
             self::markTestSkipped('Real sandbox credentials not provided.');
         }
 
-        $http = new Client(['timeout' => 15]);
-        $client = new TaxoraClient(
-            http: $http,
-            requestFactory: new RequestFactory(),
-            streamFactory: new StreamFactory(),
-            apiKey: $apiKey,
-            tokenStorage: null,
-            environment: !empty(getenv('TAXORA_ENV')) ? Environment::tryFrom(getenv('TAXORA_ENV')) : Environment::SANDBOX
-        );
-
         $client = TaxoraClientFactory::create($apiKey, environment: Environment::SANDBOX);
 
         $loginResponse = $client->login($username, $password);
         self::assertNotEmpty($loginResponse->accessToken);
         self::assertFalse($loginResponse->isExpired());
+
+        $client->loginWithClientId('client_123', 'client-secret', device: 'integration-box');
+        self::assertNotEmpty($loginResponse->accessToken);
+        self::assertFalse($loginResponse->isExpired());
+
         $vatResponse = $client->vat()->validate('FR99345678901');
         self::assertSame(VatState::VALID, $vatResponse->state);
         self::assertSame('FR99345678901', $vatResponse->vat_uid);

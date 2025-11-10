@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use Taxora\Sdk\Enums\LoginIdentifier;
 use Taxora\Sdk\Exceptions\AuthenticationException;
 use Taxora\Sdk\Exceptions\HttpException;
 use Taxora\Sdk\Endpoints\AuthEndpoint;
@@ -57,6 +58,82 @@ final class AuthTest extends TestCase
             'password' => 'secret',
             'device_name' => 'unit-test-device',
         ], $body);
+    }
+
+    public function testLoginSupportsClientIdIdentifiers(): void
+    {
+        $responses = [new Response(200, ['Content-Type' => 'application/json'], json_encode([
+            'success' => 1,
+            'data' => [
+                'access_token' => 'abc123',
+                'token_type' => 'Bearer',
+                'expires_in' => 120,
+            ],
+        ], JSON_UNESCAPED_SLASHES))];
+
+        $client = new ArrayHttpClient($responses);
+        $requestFactory = new RequestFactory();
+        $streamFactory = new StreamFactory();
+        $store = new InMemoryTokenStorage();
+
+        $endpoint = new AuthEndpoint(
+            $client,
+            $requestFactory,
+            $streamFactory,
+            new ApiKeyMiddleware('test-key'),
+            new AuthMiddleware($store),
+            $store,
+            'https://sandbox.taxora.io'
+        );
+
+        $endpoint->login('client_123', 'secret', 'unit-test-device', LoginIdentifier::CLIENT_ID);
+
+        $request = $client->requests[0] ?? null;
+        self::assertInstanceOf(RequestInterface::class, $request);
+        $body = json_decode((string) $request->getBody(), true);
+        self::assertSame([
+            'client_id' => 'client_123',
+            'password' => 'secret',
+            'device_name' => 'unit-test-device',
+        ], $body);
+    }
+
+    public function testLoginWithClientIdHelperUsesClientIdField(): void
+    {
+        $responses = [new Response(200, ['Content-Type' => 'application/json'], json_encode([
+            'success' => 1,
+            'data' => [
+                'access_token' => 'xyz987',
+                'token_type' => 'Bearer',
+                'expires_in' => 60,
+            ],
+        ], JSON_UNESCAPED_SLASHES))];
+
+        $client = new ArrayHttpClient($responses);
+        $requestFactory = new RequestFactory();
+        $streamFactory = new StreamFactory();
+        $store = new InMemoryTokenStorage();
+
+        $endpoint = new AuthEndpoint(
+            $client,
+            $requestFactory,
+            $streamFactory,
+            new ApiKeyMiddleware('test-key'),
+            new AuthMiddleware($store),
+            $store,
+            'https://sandbox.taxora.io'
+        );
+
+        $endpoint->loginWithClientId('client_456', 'client-secret', 'unit-test-device');
+
+        $request = $client->requests[0] ?? null;
+        self::assertInstanceOf(RequestInterface::class, $request);
+        $payload = json_decode((string) $request->getBody(), true);
+        self::assertSame([
+            'client_id' => 'client_456',
+            'password' => 'client-secret',
+            'device_name' => 'unit-test-device',
+        ], $payload);
     }
 
     public function testRefreshUsesStoredTokenAndReplacesIt(): void
