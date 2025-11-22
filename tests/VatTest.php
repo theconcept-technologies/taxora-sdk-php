@@ -40,6 +40,7 @@ final class VatTest extends TestCase
             'used_providers' => ['fon', 'vies'],
             'provider_vat_state' => 'VALID',
             'provider_note' => 'Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).',
+            'provider_last_checked_at' => '2024-01-19T13:15:00Z',
         ];
         $vo = VatResource::fromArray($data);
 
@@ -66,6 +67,32 @@ final class VatTest extends TestCase
         self::assertSame(['fon', 'vies'], $vo->used_providers);
         self::assertSame('VALID', $vo->provider_vat_state);
         self::assertSame('Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).', $vo->provider_note);
+        self::assertSame('2024-01-19T13:15:00+00:00', $vo->provider_last_checked_at?->format(DATE_ATOM));
+    }
+
+    public function testVatResourceToArrayFormatsProviderFields(): void
+    {
+        $vo = VatResource::fromArray([
+            'vat_uid' => 'ATU00000000',
+            'state' => VatState::INVALID->value,
+            'checked_at' => '2024-01-10T08:00:00Z',
+            'provider_last_checked_at' => '2024-01-11T09:30:00Z',
+            'environment' => 'SANDBOX',
+            'provider' => 'fon',
+            'used_providers' => '["fon", "vies", ""]',
+            'provider_vat_state' => 'INVALID',
+            'provider_note' => 'Upstream could not confirm VAT.',
+        ]);
+
+        $payload = $vo->toArray();
+
+        self::assertSame('fon', $payload['provider']);
+        self::assertSame(['fon', 'vies'], $payload['used_providers']);
+        self::assertSame('INVALID', $payload['provider_vat_state']);
+        self::assertSame('Upstream could not confirm VAT.', $payload['provider_note']);
+        self::assertSame('2024-01-11T09:30:00+00:00', $payload['provider_last_checked_at']);
+        self::assertSame('2024-01-10T08:00:00+00:00', $payload['checked_at']);
+        self::assertSame('SANDBOX', $payload['environment']);
     }
 
     public function testVatCollectionFromHistoryResponse(): void

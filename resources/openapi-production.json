@@ -51,6 +51,98 @@
                 ]
             }
         },
+        "/v1/analytics/insights": {
+            "get": {
+                "tags": [
+                    "Company"
+                ],
+                "summary": "Get advanced analytics insights",
+                "description": "Returns validation, geographic, AI, time-based, and business insights with optional filters.",
+                "operationId": "7573ee35cc371033ec4a2e404b0858b1",
+                "parameters": [
+                    {
+                        "name": "from",
+                        "in": "query",
+                        "description": "Start date (ISO 8601)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "to",
+                        "in": "query",
+                        "description": "End date (ISO 8601)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "account_id",
+                        "in": "query",
+                        "description": "Filter analytics for a specific account/company ID",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "api_key",
+                        "in": "query",
+                        "description": "Filter analytics by API key (plaintext or hashed)",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "critical_threshold",
+                        "in": "query",
+                        "description": "Failure rate threshold for highlighting critical countries (0-1)",
+                        "required": false,
+                        "schema": {
+                            "type": "number",
+                            "format": "float"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Analytics insights payload",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authorized"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/login": {
             "post": {
                 "tags": [
@@ -1307,8 +1399,8 @@
                 "tags": [
                     "VAT"
                 ],
-                "summary": "Download VAT Certificates Bulk Export",
-                "description": "Downloads a ZIP file containing VAT certificates that were previously exported. The export must belong to the company of the authenticated user.",
+                "summary": "Download VAT Certificates Export",
+                "description": "Downloads the requested VAT certificates export (ZIP archive with certificates or single PDF list) if it belongs to the authenticated company.",
                 "operationId": "downloadVatCertificatesBulkExport",
                 "parameters": [
                     {
@@ -1324,10 +1416,10 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "ZIP file containing VAT certificates",
+                        "description": "ZIP archive with certificates or single PDF list",
                         "headers": {
                             "Content-Type": {
-                                "description": "application/zip",
+                                "description": "application/zip or application/pdf",
                                 "schema": {
                                     "type": "string"
                                 }
@@ -1335,6 +1427,12 @@
                         },
                         "content": {
                             "application/zip": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            },
+                            "application/pdf": {
                                 "schema": {
                                     "type": "string",
                                     "format": "binary"
@@ -1421,6 +1519,71 @@
                                 }
                             }
                         }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/vat/certificates/list-export": {
+            "post": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Initiate List Export of VAT Checks",
+                "description": "Initiates an asynchronous process that creates a single PDF listing VAT checks in the given period.",
+                "operationId": "initiateVatCertificatesListExport",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "from_date",
+                                    "to_date"
+                                ],
+                                "properties": {
+                                    "from_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2023-01-01"
+                                    },
+                                    "to_date": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2023-12-31"
+                                    },
+                                    "countries": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "nullable": true
+                                    },
+                                    "lang": {
+                                        "type": "string",
+                                        "example": "en",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "Export initiated"
+                    },
+                    "400": {
+                        "description": "Validation Error"
+                    },
+                    "500": {
+                        "description": "Server Error"
                     }
                 },
                 "security": [
@@ -1781,6 +1944,13 @@
                         "description": "Explanatory note included when the provider state differs from the validation result",
                         "type": "string",
                         "example": "Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).",
+                        "nullable": true
+                    },
+                    "provider_last_checked_at": {
+                        "description": "Timestamp of the most recent upstream provider confirmation",
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2024-01-19T12:40:00Z",
                         "nullable": true
                     }
                 },

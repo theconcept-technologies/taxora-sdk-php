@@ -87,6 +87,40 @@ final class VatEndpointTest extends TestCase
         self::assertSame('2024-02-29', $payload['to_date']);
     }
 
+    public function testCertificatesListExportFormatsDateTimeParameters(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(202, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [
+                    'export_id' => 'exp_list_123',
+                    'message' => 'VAT certificates list export initiated.',
+                ],
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $endpoint = $this->createEndpoint($http);
+
+        $result = $endpoint->certificatesListExport(
+            new \DateTimeImmutable('2024-04-01'),
+            new \DateTimeImmutable('2024-04-30'),
+            ['AT'],
+            Language::GERMAN
+        );
+
+        self::assertInstanceOf(VatCertificateExport::class, $result);
+        self::assertSame('exp_list_123', $result->exportId);
+        self::assertSame('VAT certificates list export initiated.', $result->message);
+
+        $request = $http->requests[0];
+        self::assertSame('/v1/vat/certificates/list-export', $request->getUri()->getPath());
+        $payload = json_decode((string) $request->getBody(), true);
+        self::assertSame('2024-04-01', $payload['from_date']);
+        self::assertSame('2024-04-30', $payload['to_date']);
+        self::assertSame(['AT'], $payload['countries']);
+        self::assertSame('de', $payload['lang']);
+    }
+
     public function testCertificatesBulkExportRejectsInvalidDateString(): void
     {
         $http = new SequenceHttpClient([]);
@@ -114,6 +148,24 @@ final class VatEndpointTest extends TestCase
         $this->expectExceptionMessage('Export response is missing export_id.');
 
         $endpoint->certificatesBulkExport('2024-03-01', '2024-03-31');
+    }
+
+    public function testDownloadBulkExportSupportsPdfOrZip(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/pdf'], 'PDF_BYTES'),
+            new Response(200, ['Content-Type' => 'application/zip'], 'ZIP_BYTES'),
+        ]);
+
+        $endpoint = $this->createEndpoint($http);
+
+        $pdf = $endpoint->downloadBulkExport('exp_pdf');
+        $zip = $endpoint->downloadBulkExport('exp_zip');
+
+        self::assertSame('PDF_BYTES', $pdf);
+        self::assertSame('ZIP_BYTES', $zip);
+        self::assertSame('/v1/vat/certificates/download/exp_pdf', $http->requests[0]->getUri()->getPath());
+        self::assertSame('/v1/vat/certificates/download/exp_zip', $http->requests[1]->getUri()->getPath());
     }
 
     private function createEndpoint(SequenceHttpClient $http): VatEndpoint

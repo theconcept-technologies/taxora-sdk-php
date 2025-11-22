@@ -16,9 +16,9 @@ The **Taxora SDK** provides an elegant, PSR-compliant interface to the [Taxora A
 * ✅ Secure **API-Key** and **Bearer Token** authentication
 * ✅ Single & multiple VAT validation with AI-based company matching
 * ✅ VAT state history and search endpoints
-* ✅ Certificate generation (PDF) and bulk export (ZIP)
+* ✅ Certificate generation (PDF) and bulk/list exports (ZIP or PDF)
 * ✅ Full test coverage & PSR-18 compatible HTTP client
-* ✅ PHP 8.3 and 8.4 ready
+* ✅ PHP 8.3, 8.4, and (soon) 8.5 ready
 
 > 🔒 The SDK itself is free to use, but a **Taxora API subscription** is required.
 > You can obtain your `x-api-key` from your [Taxora account developer settings](https://app.taxora.io).
@@ -186,7 +186,7 @@ Run the test suite locally:
 composer test
 ```
 
-CI runs on **PHP 8.3** and **8.4**, verifying:
+CI runs on **PHP 8.3**, **8.4**, and (soon) **8.5**, verifying:
 
 * PHPUnit 12
 * Psalm static analysis

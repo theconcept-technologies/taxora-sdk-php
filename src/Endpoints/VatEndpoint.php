@@ -163,7 +163,23 @@ final class VatEndpoint
         return VatCertificateExport::fromArray($data);
     }
 
-    /** Bulk download ZIP (binary string) */
+    /** List export (returns export_id etc.) */
+    public function certificatesListExport(DateTimeInterface|string $fromDate, DateTimeInterface|string $toDate, ?array $countries = null, ?Language $lang = null): VatCertificateExport
+    {
+        $uri = $this->uri('/vat/certificates/list-export');
+        $body = array_filter([
+            'from_date' => $this->formatDate($fromDate),
+            'to_date'   => $this->formatDate($toDate),
+            'countries' => $countries,
+            'lang'      => $lang?->value,
+        ], fn ($v) => $v !== null);
+        $payload = $this->jsonPost($uri, $body); // 202 Accepted with export_id
+        $data = $this->extractData($payload);
+
+        return VatCertificateExport::fromArray($data);
+    }
+
+    /** Bulk download ZIP or PDF (binary string) */
     public function downloadBulkExport(string $exportId): string
     {
         $uri = $this->uri('/vat/certificates/download/'.rawurlencode($exportId));
