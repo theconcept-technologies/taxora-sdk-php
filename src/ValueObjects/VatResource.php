@@ -8,7 +8,7 @@ use Taxora\Sdk\Enums\VatState;
 /**
  * Immutable DTO mapped from OpenAPI VatResource.
  * Fields per spec: uuid, vat_uid, state, country_code, company_name, company_address,
- * requested_company_name, checked_at, score, breakdown[], provider_last_checked_at.
+ * requested_company_name, checked_at, score, breakdown[], provider_last_checked_at, provider_document.
  * Ref: components/schemas/VatResource.  [oai_citation:0‡api-docs-sandbox.json](sediment://file_00000000578861f5acaecc8e4f531a99)
  */
 final readonly class VatResource
@@ -32,6 +32,7 @@ final readonly class VatResource
         public ?string $provider_vat_state = null,
         public ?string $provider_note = null,
         public ?\DateTimeImmutable $provider_last_checked_at = null,
+        public ?ProviderDocument $provider_document = null,
     ) {
     }
 
@@ -57,6 +58,7 @@ final readonly class VatResource
             provider_vat_state: isset($data['provider_vat_state']) && is_string($data['provider_vat_state']) ? $data['provider_vat_state'] : null,
             provider_note: isset($data['provider_note']) && is_string($data['provider_note']) ? $data['provider_note'] : null,
             provider_last_checked_at: isset($data['provider_last_checked_at']) ? new \DateTimeImmutable($data['provider_last_checked_at']) : null,
+            provider_document: ProviderDocument::fromArray($data['provider_document'] ?? null),
         );
     }
 
@@ -102,6 +104,7 @@ final readonly class VatResource
             'provider_vat_state'      => $this->provider_vat_state,
             'provider_note'           => $this->provider_note,
             'provider_last_checked_at' => $this->provider_last_checked_at?->format(DATE_ATOM),
+            'provider_document'       => $this->provider_document?->toArray(),
         ];
     }
 

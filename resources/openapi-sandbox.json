@@ -1023,6 +1023,80 @@
                                         },
                                         "data": {
                                             "$ref": "#/components/schemas/VatResource"
+                                        },
+                                        "provider_document": {
+                                            "description": "If available, the linked provider document for this history entry",
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 123
+                                                },
+                                                "provider": {
+                                                    "type": "string",
+                                                    "example": "fon"
+                                                },
+                                                "document_type": {
+                                                    "type": "string",
+                                                    "example": "fon_daily_xml"
+                                                },
+                                                "state": {
+                                                    "type": "string",
+                                                    "example": "imported"
+                                                },
+                                                "document_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2025-12-08"
+                                                },
+                                                "mime": {
+                                                    "type": "string",
+                                                    "example": "application/xml"
+                                                },
+                                                "size": {
+                                                    "type": "integer",
+                                                    "example": 12345
+                                                },
+                                                "hash": {
+                                                    "type": "string",
+                                                    "example": "abc123"
+                                                },
+                                                "meta": {
+                                                    "type": "object",
+                                                    "nullable": true
+                                                },
+                                                "line": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 456
+                                                        },
+                                                        "vat_uid": {
+                                                            "type": "string",
+                                                            "example": "ATU12345678"
+                                                        },
+                                                        "row_number": {
+                                                            "type": "integer",
+                                                            "example": 12
+                                                        },
+                                                        "entry_identifier": {
+                                                            "type": "string",
+                                                            "example": "1"
+                                                        },
+                                                        "reference": {
+                                                            "type": "string",
+                                                            "example": "FONREF"
+                                                        },
+                                                        "meta": {
+                                                            "type": "object",
+                                                            "nullable": true
+                                                        }
+                                                    },
+                                                    "type": "object",
+                                                    "nullable": true
+                                                }
+                                            },
+                                            "type": "object",
+                                            "nullable": true
                                         }
                                     },
                                     "type": "object"
@@ -1286,6 +1360,11 @@
                                         "type": "string",
                                         "example": "en",
                                         "nullable": true
+                                    },
+                                    "include_documents": {
+                                        "description": "Include provider documents (combined XML, screenshots as zip entries) in the export archive",
+                                        "type": "boolean",
+                                        "example": false
                                     }
                                 },
                                 "type": "object"
@@ -1568,6 +1647,11 @@
                                         "type": "string",
                                         "example": "en",
                                         "nullable": true
+                                    },
+                                    "include_documents": {
+                                        "description": "Include provider documents (combined XML, screenshots as zip entries) in the export archive",
+                                        "type": "boolean",
+                                        "example": false
                                     }
                                 },
                                 "type": "object"

@@ -7,6 +7,8 @@ use Taxora\Sdk\ValueObjects\VatResource;
 use Taxora\Sdk\ValueObjects\VatCollection;
 use Taxora\Sdk\ValueObjects\ScoreBreakdown;
 use Taxora\Sdk\ValueObjects\CompanyAddress;
+use Taxora\Sdk\ValueObjects\ProviderDocument;
+use Taxora\Sdk\ValueObjects\ProviderDocumentLine;
 use Taxora\Sdk\Tests\Fixtures\SandboxVatFixtures;
 
 final class VatTest extends TestCase
@@ -68,6 +70,90 @@ final class VatTest extends TestCase
         self::assertSame('VALID', $vo->provider_vat_state);
         self::assertSame('Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).', $vo->provider_note);
         self::assertSame('2024-01-19T13:15:00+00:00', $vo->provider_last_checked_at?->format(DATE_ATOM));
+    }
+
+    public function testVatResourceMapsProviderDocument(): void
+    {
+        $payload = [
+            'vat_uid' => 'ATU12345678',
+            'state' => VatState::VALID->value,
+            'provider_document' => [
+                'id' => 123,
+                'provider' => 'fon',
+                'document_type' => 'fon_daily_xml',
+                'state' => 'imported',
+                'document_date' => '2025-12-08',
+                'mime' => 'application/xml',
+                'size' => 9876,
+                'hash' => 'abc123',
+                'meta' => ['source' => 'daily_feed'],
+                'line' => [
+                    'id' => 456,
+                    'vat_uid' => 'ATU12345678',
+                    'row_number' => 12,
+                    'entry_identifier' => '1',
+                    'reference' => 'FONREF',
+                    'meta' => ['note' => 'line meta'],
+                ],
+            ],
+        ];
+
+        $vo = VatResource::fromArray($payload);
+
+        self::assertInstanceOf(ProviderDocument::class, $vo->provider_document);
+        self::assertSame(123, $vo->provider_document?->id);
+        self::assertSame('fon', $vo->provider_document?->provider);
+        self::assertSame('fon_daily_xml', $vo->provider_document?->document_type);
+        self::assertSame('imported', $vo->provider_document?->state);
+        self::assertSame('2025-12-08', $vo->provider_document?->document_date?->format('Y-m-d'));
+        self::assertSame('application/xml', $vo->provider_document?->mime);
+        self::assertSame(9876, $vo->provider_document?->size);
+        self::assertSame('abc123', $vo->provider_document?->hash);
+        self::assertSame(['source' => 'daily_feed'], $vo->provider_document?->meta);
+        self::assertInstanceOf(ProviderDocumentLine::class, $vo->provider_document?->line);
+        self::assertSame(12, $vo->provider_document?->line?->row_number);
+        self::assertSame('FONREF', $vo->provider_document?->line?->reference);
+        self::assertSame(['note' => 'line meta'], $vo->provider_document?->line?->meta);
+    }
+
+    public function testVatResourceToArrayIncludesProviderDocument(): void
+    {
+        $vo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345678',
+            'state' => VatState::VALID->value,
+            'provider_document' => [
+                'id' => 321,
+                'provider' => 'vies',
+                'document_type' => 'vies_response',
+                'state' => 'archived',
+                'document_date' => '2023-01-02',
+                'mime' => 'application/xml',
+                'size' => 1024,
+                'hash' => 'hashhash',
+                'meta' => null,
+                'line' => [
+                    'id' => 789,
+                    'vat_uid' => 'ATU12345678',
+                    'row_number' => 3,
+                    'entry_identifier' => '3',
+                    'reference' => null,
+                    'meta' => ['raw' => true],
+                ],
+            ],
+        ]);
+
+        $payload = $vo->toArray();
+
+        self::assertIsArray($payload['provider_document']);
+        self::assertSame(321, $payload['provider_document']['id']);
+        self::assertSame('2023-01-02', $payload['provider_document']['document_date']);
+        self::assertSame('vies', $payload['provider_document']['provider']);
+        self::assertSame('vies_response', $payload['provider_document']['document_type']);
+        self::assertSame('archived', $payload['provider_document']['state']);
+        self::assertNull($payload['provider_document']['meta']);
+        self::assertIsArray($payload['provider_document']['line']);
+        self::assertSame(['raw' => true], $payload['provider_document']['line']['meta']);
+        self::assertSame(3, $payload['provider_document']['line']['row_number']);
     }
 
     public function testVatResourceToArrayFormatsProviderFields(): void

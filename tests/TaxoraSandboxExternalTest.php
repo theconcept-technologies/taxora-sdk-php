@@ -16,6 +16,9 @@ final class TaxoraSandboxExternalTest extends TestCase
         $username = getenv('TAXORA_USERNAME') ?: '';
         $password = getenv('TAXORA_PASSWORD') ?: '';
 
+        $clientID = "client_123";
+        $clientSecret = "client-secret";
+
         $defaultApiKey = 'test_api_key';
         $defaultUsername = 'user@example.com';
         $defaultPassword = 'secret';
@@ -30,7 +33,7 @@ final class TaxoraSandboxExternalTest extends TestCase
         self::assertNotEmpty($loginResponse->accessToken);
         self::assertFalse($loginResponse->isExpired());
 
-        $loginResponse = $client->loginWithClientId('client_123', 'client-secret', device: 'integration-box');
+        $loginResponse = $client->loginWithClientId($clientID, $clientSecret, device: 'integration-box');
         self::assertNotEmpty($loginResponse->accessToken);
         self::assertFalse($loginResponse->isExpired());
 
