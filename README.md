@@ -67,6 +67,16 @@ foreach ($vat->breakdown ?? [] as $step) {
     echo $step->stepName.' gave '.$step->scoreContribution.PHP_EOL;
 }
 
+// Optional typed address input for fallback name scoring
+$addressInput = new \Taxora\Sdk\ValueObjects\VatValidationAddressInput(
+    addressLine1: 'Example GmbH',
+    addressLine2: '2nd Floor',
+    postalCode: '1010',
+    city: 'Vienna',
+    countryCode: 'AT'
+);
+$vatWithAddress = $client->vat()->validate('ATU12345678', 'John Doe', 'vies', $addressInput);
+
 // 3️⃣ Access company info
 $company = $client->company()->get();
 

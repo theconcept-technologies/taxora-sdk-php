@@ -284,8 +284,12 @@
                             "application/json": {
                                 "schema": {
                                     "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
                                         "data": {
-                                            "type": "object"
+                                            "$ref": "#/components/schemas/CompanyResource"
                                         }
                                     },
                                     "type": "object"
@@ -634,13 +638,616 @@
                 ]
             }
         },
+        "/v1/reports": {
+            "get": {
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "List report runs for the authenticated company",
+                "operationId": "4209380269295829e80839781962d110",
+                "parameters": [
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "description": "Items per page (default 25)",
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 100,
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "name": "job_id",
+                        "in": "query",
+                        "description": "Filter report runs by report job id",
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    },
+                    {
+                        "name": "generated_only",
+                        "in": "query",
+                        "description": "Return only runs that have a generated report file",
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of report runs",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "data": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "string",
+                                                                "format": "uuid"
+                                                            },
+                                                            "job_id": {
+                                                                "type": "string",
+                                                                "format": "uuid"
+                                                            },
+                                                            "type": {
+                                                                "type": "string",
+                                                                "example": "vat_certificates_list"
+                                                            },
+                                                            "job_name": {
+                                                                "type": "string",
+                                                                "nullable": true
+                                                            },
+                                                            "state": {
+                                                                "type": "string"
+                                                            },
+                                                            "result": {
+                                                                "type": "string",
+                                                                "nullable": true
+                                                            },
+                                                            "params": {
+                                                                "type": "object"
+                                                            },
+                                                            "scheduled_at": {
+                                                                "type": "string",
+                                                                "format": "date-time",
+                                                                "nullable": true
+                                                            },
+                                                            "started_at": {
+                                                                "type": "string",
+                                                                "format": "date-time",
+                                                                "nullable": true
+                                                            },
+                                                            "finished_at": {
+                                                                "type": "string",
+                                                                "format": "date-time",
+                                                                "nullable": true
+                                                            },
+                                                            "file_disk": {
+                                                                "type": "string",
+                                                                "nullable": true
+                                                            },
+                                                            "file_path": {
+                                                                "type": "string",
+                                                                "nullable": true
+                                                            },
+                                                            "file_name": {
+                                                                "type": "string",
+                                                                "nullable": true
+                                                            },
+                                                            "file_mime": {
+                                                                "type": "string",
+                                                                "nullable": true
+                                                            },
+                                                            "file_size": {
+                                                                "type": "integer",
+                                                                "nullable": true
+                                                            },
+                                                            "error_message": {
+                                                                "type": "string",
+                                                                "nullable": true
+                                                            },
+                                                            "created_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            },
+                                                            "updated_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "current_page": {
+                                                    "type": "integer"
+                                                },
+                                                "per_page": {
+                                                    "type": "integer"
+                                                },
+                                                "total": {
+                                                    "type": "integer"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/reports/runs": {
+            "post": {
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "Create a report run for the authenticated company",
+                "operationId": "f39314a9d43c7a049cc6cdcadd049efa",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "format": "uuid",
+                                        "nullable": true
+                                    },
+                                    "job_id": {
+                                        "type": "string",
+                                        "format": "uuid"
+                                    },
+                                    "state": {
+                                        "type": "string",
+                                        "example": "completed"
+                                    },
+                                    "params": {
+                                        "type": "object"
+                                    },
+                                    "scheduled_at": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "nullable": true
+                                    },
+                                    "started_at": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "nullable": true
+                                    },
+                                    "finished_at": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "nullable": true
+                                    },
+                                    "result": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "file_disk": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "file_path": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "file_name": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "file_mime": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "file_size": {
+                                        "type": "integer",
+                                        "nullable": true
+                                    },
+                                    "error_message": {
+                                        "type": "string",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Report run created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request"
+                    },
+                    "404": {
+                        "description": "Report job not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/reports/runs/{id}": {
+            "delete": {
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "Delete a report run (and its file) for the authenticated company",
+                "operationId": "dc2d43f470f39ff42a3cddf8401d6545",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "message": {
+                                                    "type": "string",
+                                                    "example": "Report run deleted"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID"
+                    },
+                    "404": {
+                        "description": "Not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/reports/runs/{id}/download": {
+            "get": {
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "Download a report run file",
+                "operationId": "1e21a213431faf83c01df894ff53fbbb",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Report file",
+                        "content": {
+                            "application/octet-stream": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid ID"
+                    },
+                    "404": {
+                        "description": "Not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/reports/jobs": {
+            "get": {
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "List report jobs for the authenticated company",
+                "operationId": "857d66ab6df11d161b55e40d034ebea4",
+                "parameters": [
+                    {
+                        "name": "per_page",
+                        "in": "query",
+                        "description": "Items per page (default 25)",
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 100,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of report jobs",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "Create or update a report job including scheduling",
+                "operationId": "2c8e67ea08682adafc009c3d80bb4886",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "format": "uuid",
+                                        "nullable": true
+                                    },
+                                    "type": {
+                                        "type": "string",
+                                        "example": "vat_certificates_bulk"
+                                    },
+                                    "subtype": {
+                                        "type": "string",
+                                        "example": "scheduled",
+                                        "nullable": true
+                                    },
+                                    "name": {
+                                        "type": "string",
+                                        "nullable": true
+                                    },
+                                    "params": {
+                                        "description": "Job parameters. Common keys: lang (en|de), from_date, to_date, countries, include_documents. Date fields support placeholders: {{last_run_at}}, {{scheduled_at}} or relative strings like 'last monday', 'first day of last month'. Scheduled jobs store schedule metadata under params.schedule.",
+                                        "type": "object"
+                                    },
+                                    "schedule": {
+                                        "properties": {
+                                            "type": {
+                                                "type": "string",
+                                                "example": "weekly"
+                                            },
+                                            "day": {
+                                                "type": "integer",
+                                                "example": 1
+                                            },
+                                            "time": {
+                                                "type": "string",
+                                                "example": "08:00"
+                                            }
+                                        },
+                                        "type": "object",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Report job saved",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/reports/jobs/{id}": {
+            "get": {
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "Get a report job by ID",
+                "operationId": "7e67964f4a8cfb0bc46dfee5c05161a0",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Report job details",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Report job not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "Delete a report job for the authenticated company",
+                "operationId": "8b94d6469bb6e5f0e141f4a28d71ebf9",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/vat/validate": {
             "post": {
                 "tags": [
                     "VAT"
                 ],
                 "summary": "Validate a VAT UID",
-                "description": "Checks if a VAT UID is valid.",
+                "description": "Checks if a VAT UID is valid. If the AI company-name score is near zero and addressLine1 is provided, Taxora retries scoring by using addressLine1 as company-name candidate and keeps the better deterministic result.",
                 "operationId": "43a39536cf6714e12f99cf2910b92043",
                 "requestBody": {
                     "required": true,
@@ -661,6 +1268,42 @@
                                         "type": "string",
                                         "example": "Example Company GmbH"
                                     },
+                                    "addressLine1": {
+                                        "description": "Optional first address line. Used as fallback company-name candidate only when company_name scoring is near zero.",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "example": "Example Company GmbH",
+                                        "nullable": true
+                                    },
+                                    "addressLine2": {
+                                        "description": "Optional second address line.",
+                                        "type": "string",
+                                        "maxLength": 255,
+                                        "example": "Second Floor",
+                                        "nullable": true
+                                    },
+                                    "postalCode": {
+                                        "description": "Optional postal code.",
+                                        "type": "string",
+                                        "maxLength": 32,
+                                        "example": "1010",
+                                        "nullable": true
+                                    },
+                                    "city": {
+                                        "description": "Optional city.",
+                                        "type": "string",
+                                        "maxLength": 120,
+                                        "example": "Vienna",
+                                        "nullable": true
+                                    },
+                                    "countryCode": {
+                                        "description": "Optional ISO 3166-1 alpha-2 country code.",
+                                        "type": "string",
+                                        "maxLength": 2,
+                                        "minLength": 2,
+                                        "example": "AT",
+                                        "nullable": true
+                                    },
                                     "provider": {
                                         "description": "The VAT provider to use for validation. Possible values: 'fon' (Fon), 'vies' (Vies), 'uk_hmrc' (UK HMRC), 'ai_search' (AI Search), 'fon_vies_ai_search' (Fon + Vies + AI Search), 'uk_hmrc_ai_search' (UK HMRC + AI Search), 'fon_ai_search' (Fon + AI Search), 'fon_vies' (Fon + Vies), 'vies_ai_search' (Vies + AI Search). Default is null.",
                                         "type": "string",
@@ -668,6 +1311,28 @@
                                     }
                                 },
                                 "type": "object"
+                            },
+                            "examples": {
+                                "standardCompanyName": {
+                                    "summary": "Standard request",
+                                    "value": {
+                                        "vat_uid": "ATU12345678",
+                                        "company_name": "Example Company GmbH",
+                                        "provider": "vies"
+                                    }
+                                },
+                                "addressLineFallback": {
+                                    "summary": "Fallback case: company is in addressLine1",
+                                    "value": {
+                                        "vat_uid": "ATU12345678",
+                                        "company_name": "John Doe",
+                                        "addressLine1": "Example Company GmbH",
+                                        "postalCode": "1010",
+                                        "city": "Vienna",
+                                        "countryCode": "AT",
+                                        "provider": "vies"
+                                    }
+                                }
                             }
                         }
                     }
@@ -939,7 +1604,7 @@
                     "VAT"
                 ],
                 "summary": "Get VAT history",
-                "description": "Retrieves the history of a VAT UID.",
+                "description": "Retrieves VAT history entries. Supports filtering by VAT UID, search term, and date range with pagination.",
                 "operationId": "56a36f5aba3cca9c80ade16dfbaf3afb",
                 "parameters": [
                     {
@@ -950,6 +1615,48 @@
                         "schema": {
                             "type": "string",
                             "example": "ATU12345678"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Search term: if it's a valid VAT UID, performs an exact VAT UID match; otherwise searches by company name",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "Example GmbH"
+                        }
+                    },
+                    {
+                        "name": "from_date",
+                        "in": "query",
+                        "description": "Filter results from this date (YYYY-MM-DD). If no date range is supplied and no VAT UID is specified, defaults to the last 12 months.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date",
+                            "example": "2025-01-01"
+                        }
+                    },
+                    {
+                        "name": "to_date",
+                        "in": "query",
+                        "description": "Filter results up to this date (YYYY-MM-DD). If no date range is supplied and no VAT UID is specified, defaults to the last 12 months.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date",
+                            "example": "2026-01-01"
+                        }
+                    },
+                    {
+                        "name": "perPage",
+                        "in": "query",
+                        "description": "Number of results per page",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "example": 30
                         }
                     }
                 ],
@@ -1023,80 +1730,6 @@
                                         },
                                         "data": {
                                             "$ref": "#/components/schemas/VatResource"
-                                        },
-                                        "provider_document": {
-                                            "description": "If available, the linked provider document for this history entry",
-                                            "properties": {
-                                                "id": {
-                                                    "type": "integer",
-                                                    "example": 123
-                                                },
-                                                "provider": {
-                                                    "type": "string",
-                                                    "example": "fon"
-                                                },
-                                                "document_type": {
-                                                    "type": "string",
-                                                    "example": "fon_daily_xml"
-                                                },
-                                                "state": {
-                                                    "type": "string",
-                                                    "example": "imported"
-                                                },
-                                                "document_date": {
-                                                    "type": "string",
-                                                    "format": "date",
-                                                    "example": "2025-12-08"
-                                                },
-                                                "mime": {
-                                                    "type": "string",
-                                                    "example": "application/xml"
-                                                },
-                                                "size": {
-                                                    "type": "integer",
-                                                    "example": 12345
-                                                },
-                                                "hash": {
-                                                    "type": "string",
-                                                    "example": "abc123"
-                                                },
-                                                "meta": {
-                                                    "type": "object",
-                                                    "nullable": true
-                                                },
-                                                "line": {
-                                                    "properties": {
-                                                        "id": {
-                                                            "type": "integer",
-                                                            "example": 456
-                                                        },
-                                                        "vat_uid": {
-                                                            "type": "string",
-                                                            "example": "ATU12345678"
-                                                        },
-                                                        "row_number": {
-                                                            "type": "integer",
-                                                            "example": 12
-                                                        },
-                                                        "entry_identifier": {
-                                                            "type": "string",
-                                                            "example": "1"
-                                                        },
-                                                        "reference": {
-                                                            "type": "string",
-                                                            "example": "FONREF"
-                                                        },
-                                                        "meta": {
-                                                            "type": "object",
-                                                            "nullable": true
-                                                        }
-                                                    },
-                                                    "type": "object",
-                                                    "nullable": true
-                                                }
-                                            },
-                                            "type": "object",
-                                            "nullable": true
                                         }
                                     },
                                     "type": "object"
@@ -1112,6 +1745,112 @@
                     },
                     "503": {
                         "description": "Sandbox not configured"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/vat/history/fon-xml": {
+            "get": {
+                "tags": [
+                    "VAT"
+                ],
+                "summary": "Download FON XML for VAT history entries",
+                "description": "Returns the FON XML containing only the requested VAT history entries. All entries must belong to the same FON XML document.",
+                "operationId": "f405dab0f7e992ac0dd25e4b7d114217",
+                "parameters": [
+                    {
+                        "name": "uuids",
+                        "in": "query",
+                        "description": "VAT history UUIDs to include",
+                        "required": true,
+                        "style": "form",
+                        "explode": true,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "format": "uuid"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Filtered FON XML",
+                        "content": {
+                            "application/xml": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Not authorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Not authorized!"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "History entry not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "VAT history entry not found."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Invalid request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "History entry is not backed by a FON XML document."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
                     }
                 },
                 "security": [
@@ -1761,7 +2500,11 @@
                         "nullable": true
                     },
                     "company": {
-                        "type": "object",
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/CompanyResource"
+                            }
+                        ],
                         "nullable": true
                     },
                     "stripe_id": {
@@ -1838,6 +2581,88 @@
                 },
                 "type": "object"
             },
+            "CompanyResource": {
+                "title": "Company Resource",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "uuid": {
+                        "type": "string",
+                        "format": "uuid",
+                        "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "Taxora GmbH"
+                    },
+                    "vat_uid": {
+                        "type": "string",
+                        "example": "ATU12345678"
+                    },
+                    "address_line_1": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "address_line_2": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "street": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "zip_code": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "city": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "country_code": {
+                        "type": "string",
+                        "example": "AT",
+                        "nullable": true
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "example": "office@taxora.com"
+                    },
+                    "phone_number": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "rate_limit": {
+                        "type": "integer",
+                        "example": 100
+                    },
+                    "state": {
+                        "type": "string",
+                        "example": "active"
+                    },
+                    "subscription_plan": {
+                        "type": "string",
+                        "example": "free"
+                    },
+                    "trial_ends_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "type": "object"
+            },
             "VatSandboxTestData": {
                 "title": "Sandbox VAT Test Data",
                 "description": "Static VAT UIDs available in sandbox and development environments for testing integration flows.",
@@ -1889,10 +2714,85 @@
                         }
                     },
                     "links": {
+                        "description": "Pagination links (present when paginated).",
                         "properties": {
-                            "self": {
+                            "first": {
+                                "type": "string",
+                                "example": "https://api.taxora.io/api/v1/vat/history?page=1"
+                            },
+                            "last": {
+                                "type": "string",
+                                "example": "https://api.taxora.io/api/v1/vat/history?page=10"
+                            },
+                            "prev": {
+                                "type": "string",
+                                "example": null,
+                                "nullable": true
+                            },
+                            "next": {
+                                "type": "string",
+                                "example": "https://api.taxora.io/api/v1/vat/history?page=2",
+                                "nullable": true
+                            }
+                        },
+                        "type": "object"
+                    },
+                    "meta": {
+                        "description": "Pagination meta (present when paginated).",
+                        "properties": {
+                            "current_page": {
+                                "type": "integer",
+                                "example": 1
+                            },
+                            "from": {
+                                "type": "integer",
+                                "example": 1
+                            },
+                            "last_page": {
+                                "type": "integer",
+                                "example": 10
+                            },
+                            "path": {
                                 "type": "string",
                                 "example": "https://api.taxora.io/api/v1/vat/history"
+                            },
+                            "per_page": {
+                                "type": "integer",
+                                "example": 30
+                            },
+                            "to": {
+                                "type": "integer",
+                                "example": 30
+                            },
+                            "total": {
+                                "type": "integer",
+                                "example": 300
+                            },
+                            "links": {
+                                "type": "array",
+                                "items": {
+                                    "properties": {
+                                        "url": {
+                                            "type": "string",
+                                            "example": "https://api.taxora.io/api/v1/vat/history?page=1",
+                                            "nullable": true
+                                        },
+                                        "label": {
+                                            "type": "string",
+                                            "example": "1"
+                                        },
+                                        "page": {
+                                            "type": "integer",
+                                            "example": 1,
+                                            "nullable": true
+                                        },
+                                        "active": {
+                                            "type": "boolean",
+                                            "example": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
                             }
                         },
                         "type": "object"
@@ -1954,9 +2854,47 @@
                         "nullable": true
                     },
                     "requested_company_name": {
-                        "description": "Company name provided during the VAT validation request when recorded",
+                        "description": "Effective company-name candidate used for scoring. If addressLine1 fallback was selected, this equals addressLine1.",
                         "type": "string",
                         "example": "Example Company GmbH",
+                        "nullable": true
+                    },
+                    "requested_company_name_original": {
+                        "description": "Original company_name received from the API request.",
+                        "type": "string",
+                        "example": "John Doe",
+                        "nullable": true
+                    },
+                    "requested_input_address": {
+                        "description": "Normalized address input received from the API request.",
+                        "properties": {
+                            "addressLine1": {
+                                "type": "string",
+                                "example": "Example Company GmbH",
+                                "nullable": true
+                            },
+                            "addressLine2": {
+                                "type": "string",
+                                "example": "Second Floor",
+                                "nullable": true
+                            },
+                            "postalCode": {
+                                "type": "string",
+                                "example": "1010",
+                                "nullable": true
+                            },
+                            "city": {
+                                "type": "string",
+                                "example": "Vienna",
+                                "nullable": true
+                            },
+                            "countryCode": {
+                                "type": "string",
+                                "example": "AT",
+                                "nullable": true
+                            }
+                        },
+                        "type": "object",
                         "nullable": true
                     },
                     "checked_at": {
@@ -2018,6 +2956,31 @@
                             "type": "object"
                         }
                     },
+                    "score_source": {
+                        "description": "Source used for the final AI name score (companyName, addressLine1Fallback, or addressLine2Fallback).",
+                        "type": "string",
+                        "example": "companyName",
+                        "nullable": true
+                    },
+                    "score_attempts": {
+                        "description": "Debug view of executed score attempts.",
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "source": {
+                                    "type": "string",
+                                    "example": "companyName"
+                                },
+                                "score": {
+                                    "type": "number",
+                                    "format": "float",
+                                    "example": 0
+                                }
+                            },
+                            "type": "object"
+                        },
+                        "nullable": true
+                    },
                     "provider_vat_state": {
                         "description": "Latest VAT state reported by the upstream provider when available",
                         "type": "string",
@@ -2035,6 +2998,168 @@
                         "type": "string",
                         "format": "date-time",
                         "example": "2024-01-19T12:40:00Z",
+                        "nullable": true
+                    },
+                    "provider_document": {
+                        "description": "Deprecated: use provider_documents instead. This field will be removed in the next API version. For history entries, the document is resolved via explicit history links and may exist without a provider request.",
+                        "properties": {
+                            "id": {
+                                "type": "integer",
+                                "example": 123
+                            },
+                            "provider": {
+                                "type": "string",
+                                "example": "fon"
+                            },
+                            "document_type": {
+                                "type": "string",
+                                "example": "fon_daily_xml"
+                            },
+                            "state": {
+                                "type": "string",
+                                "example": "imported"
+                            },
+                            "document_date": {
+                                "type": "string",
+                                "format": "date",
+                                "example": "2025-12-08"
+                            },
+                            "check_date": {
+                                "type": "string",
+                                "format": "date",
+                                "example": "2025-12-08"
+                            },
+                            "mime": {
+                                "type": "string",
+                                "example": "application/xml"
+                            },
+                            "size": {
+                                "type": "integer",
+                                "example": 12345
+                            },
+                            "hash": {
+                                "type": "string",
+                                "example": "abc123"
+                            },
+                            "meta": {
+                                "type": "object",
+                                "nullable": true
+                            },
+                            "line": {
+                                "properties": {
+                                    "id": {
+                                        "type": "integer",
+                                        "example": 456
+                                    },
+                                    "vat_uid": {
+                                        "type": "string",
+                                        "example": "ATU12345678"
+                                    },
+                                    "row_number": {
+                                        "type": "integer",
+                                        "example": 12
+                                    },
+                                    "entry_identifier": {
+                                        "type": "string",
+                                        "example": "1"
+                                    },
+                                    "reference": {
+                                        "type": "string",
+                                        "example": "FONREF"
+                                    },
+                                    "meta": {
+                                        "type": "object",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object",
+                                "nullable": true
+                            }
+                        },
+                        "type": "object",
+                        "nullable": true,
+                        "deprecated": true
+                    },
+                    "provider_documents": {
+                        "description": "All linked provider documents (may include multiple providers/types). For history entries, links are created even when no provider request exists.",
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "id": {
+                                    "type": "integer",
+                                    "example": 123
+                                },
+                                "provider": {
+                                    "type": "string",
+                                    "example": "vies"
+                                },
+                                "document_type": {
+                                    "type": "string",
+                                    "example": "vies_screenshot"
+                                },
+                                "state": {
+                                    "type": "string",
+                                    "example": "imported"
+                                },
+                                "document_date": {
+                                    "type": "string",
+                                    "format": "date",
+                                    "example": "2025-12-08"
+                                },
+                                "check_date": {
+                                    "type": "string",
+                                    "format": "date",
+                                    "example": "2025-12-08"
+                                },
+                                "mime": {
+                                    "type": "string",
+                                    "example": "application/json"
+                                },
+                                "size": {
+                                    "type": "integer",
+                                    "example": 12345
+                                },
+                                "hash": {
+                                    "type": "string",
+                                    "example": "abc123"
+                                },
+                                "meta": {
+                                    "type": "object",
+                                    "nullable": true
+                                },
+                                "line": {
+                                    "properties": {
+                                        "id": {
+                                            "type": "integer",
+                                            "example": 456
+                                        },
+                                        "vat_uid": {
+                                            "type": "string",
+                                            "example": "ATU12345678"
+                                        },
+                                        "row_number": {
+                                            "type": "integer",
+                                            "example": 12
+                                        },
+                                        "entry_identifier": {
+                                            "type": "string",
+                                            "example": "1"
+                                        },
+                                        "reference": {
+                                            "type": "string",
+                                            "example": "FONREF"
+                                        },
+                                        "meta": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object",
+                                    "nullable": true
+                                }
+                            },
+                            "type": "object"
+                        },
                         "nullable": true
                     }
                 },
@@ -2068,6 +3193,10 @@
         {
             "name": "Authentication",
             "description": "Authentication"
+        },
+        {
+            "name": "Reports",
+            "description": "Reports"
         }
     ],
     "security": [

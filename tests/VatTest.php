@@ -35,7 +35,10 @@ final class VatTest extends TestCase
             'checked_at' => '2024-01-19T12:45:00Z',
             'score' => 100,
             'breakdown' => [
-                ['type' => 'AI Name Comparison', 'score' => 25, 'valid' => true, 'summary' => 'Company names match', 'code' => 'MATCH', 'details' => ['ok']],
+                [
+                    'type' => 'AI Name Comparison', 'score' => 25, 'valid' => true, 'summary' => 'Company names match',
+                    'code' => 'MATCH', 'details' => ['ok']
+                ],
             ],
             'environment' => 'LIVE',
             'provider' => 'vies',
@@ -62,13 +65,15 @@ final class VatTest extends TestCase
         self::assertInstanceOf(ScoreBreakdown::class, $vo->breakdown[0]);
         self::assertSame('AI Name Comparison', $vo->breakdown[0]->stepName);
         self::assertSame(25.0, $vo->breakdown[0]->scoreContribution);
-        self::assertSame(['valid' => true, 'summary' => 'Company names match', 'code' => 'MATCH', 'details' => ['ok']], $vo->breakdown[0]->metadata);
+        self::assertSame(['valid' => true, 'summary' => 'Company names match', 'code' => 'MATCH', 'details' => ['ok']],
+            $vo->breakdown[0]->metadata);
         // New optional upstream provider fields
         self::assertSame('LIVE', $vo->environment);
         self::assertSame('vies', $vo->provider);
         self::assertSame(['fon', 'vies'], $vo->used_providers);
         self::assertSame('VALID', $vo->provider_vat_state);
-        self::assertSame('Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).', $vo->provider_note);
+        self::assertSame('Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).',
+            $vo->provider_note);
         self::assertSame('2024-01-19T13:15:00+00:00', $vo->provider_last_checked_at?->format(DATE_ATOM));
     }
 
@@ -181,6 +186,79 @@ final class VatTest extends TestCase
         self::assertSame('SANDBOX', $payload['environment']);
     }
 
+    public function testVatResourceMapsAddressFallbackResponseFields(): void
+    {
+        $vo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345678',
+            'state' => VatState::VALID->value,
+            'requested_company_name' => 'Example Company GmbH',
+            'requested_company_name_original' => 'John Doe',
+            'requested_input_address' => [
+                'addressLine1' => 'Example Company GmbH',
+                'addressLine2' => 'Second Floor',
+                'addressLine3' => 'Building A',
+                'postalCode' => '1010',
+                'city' => 'Vienna',
+                'countryCode' => 'at',
+                'ignored' => 'skip',
+            ],
+            'score_source' => 'addressLine1Fallback',
+            'score_attempts' => [
+                ['source' => 'companyName', 'score' => 0],
+                ['source' => 'addressLine1Fallback', 'score' => 93.7],
+                ['source' => '', 'score' => 'nope'],
+            ],
+        ]);
+
+        self::assertSame('John Doe', $vo->requested_company_name_original);
+        self::assertSame('addressLine1Fallback', $vo->score_source);
+        self::assertSame(
+            [
+                'addressLine1' => 'Example Company GmbH',
+                'addressLine2' => 'Second Floor',
+                'addressLine3' => 'Building A',
+                'postalCode' => '1010',
+                'city' => 'Vienna',
+                'countryCode' => 'AT',
+            ],
+            $vo->requested_input_address
+        );
+        self::assertSame(
+            [
+                ['source' => 'companyName', 'score' => 0.0],
+                ['source' => 'addressLine1Fallback', 'score' => 93.7],
+            ],
+            $vo->score_attempts
+        );
+    }
+
+    public function testVatResourceToArrayIncludesAddressFallbackResponseFields(): void
+    {
+        $vo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345678',
+            'requested_company_name_original' => 'Original Name',
+            'requested_input_address' => '{"addressLine1":"Example Company GmbH","countryCode":"de"}',
+            'score_source' => 'addressLine1Fallback',
+            'score_attempts' => '[{"source":"companyName","score":0},{"source":"addressLine1Fallback","score":90.1}]',
+        ]);
+
+        $payload = $vo->toArray();
+
+        self::assertSame('Original Name', $payload['requested_company_name_original']);
+        self::assertSame(
+            ['addressLine1' => 'Example Company GmbH', 'countryCode' => 'DE'],
+            $payload['requested_input_address']
+        );
+        self::assertSame('addressLine1Fallback', $payload['score_source']);
+        self::assertSame(
+            [
+                ['source' => 'companyName', 'score' => 0.0],
+                ['source' => 'addressLine1Fallback', 'score' => 90.1],
+            ],
+            $payload['score_attempts']
+        );
+    }
+
     public function testVatCollectionFromHistoryResponse(): void
     {
         $validFixtures = SandboxVatFixtures::valid();
@@ -241,7 +319,16 @@ final class VatTest extends TestCase
         self::assertSame('Musterstraße 12, 1010 Wien, Austria', (string) $vo->company_address);
         self::assertSame(
             'Musterstraße 12, 1010 Wien, Austria',
-            $vo->company_address?->toArray()['full_address']
+            $vo->company_address->toArray()['full_address']
         );
+    }
+
+    public function testCompanyAddressNullFallback(): void
+    {
+        $vo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345678',
+        ]);
+
+        self::assertNull($vo->company_address);
     }
 }

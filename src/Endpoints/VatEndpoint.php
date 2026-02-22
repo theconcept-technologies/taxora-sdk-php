@@ -19,6 +19,7 @@ use Taxora\Sdk\Exceptions\ValidationException;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
 use Taxora\Sdk\Http\TokenStorageInterface;
+use Taxora\Sdk\ValueObjects\VatValidationAddressInput;
 use Taxora\Sdk\ValueObjects\VatResource;
 use Taxora\Sdk\ValueObjects\VatCertificateExport;
 use Taxora\Sdk\ValueObjects\VatCollection;
@@ -43,7 +44,12 @@ final class VatEndpoint
     }
 
     /** Validate a single VAT → VatResource */
-    public function validate(string $vatUid, ?string $companyName = null, ?string $provider = null): VatResource
+    public function validate(
+        string $vatUid,
+        ?string $companyName = null,
+        ?string $provider = null,
+        VatValidationAddressInput|array|null $addressInput = null
+    ): VatResource
     {
         $uri = $this->uri('/vat/validate');
         $body = array_filter([
@@ -51,6 +57,7 @@ final class VatEndpoint
             'company_name' => $companyName,
             'provider' => $provider,
         ], fn ($v) => $v !== null);
+        $body = [...$body, ...$this->normalizeAddressInput($addressInput)];
 
         $payload = $this->jsonPost($uri, $body);
         $data = $this->extractData($payload);
@@ -211,9 +218,8 @@ final class VatEndpoint
 
     private function jsonPost(string $uri, array $body): array
     {
-        $json = json_encode($body, JSON_UNESCAPED_SLASHES);
+        $json = $this->encodeJsonBody($body);
         $response = $this->send(function () use ($uri, $json) {
-            /** @psalm-suppress PossiblyFalseArgument */
             return $this->req->createRequest('POST', $uri)
                 ->withHeader('Content-Type', 'application/json')
                 ->withBody($this->stream->createStream($json));
@@ -247,9 +253,8 @@ final class VatEndpoint
 
     private function binaryPost(string $uri, array $body): string
     {
-        $json = json_encode($body, JSON_UNESCAPED_SLASHES);
+        $json = $this->encodeJsonBody($body);
         $response = $this->send(function () use ($uri, $json) {
-            /** @psalm-suppress PossiblyFalseArgument */
             return $this->req->createRequest('POST', $uri)
                 ->withHeader('Content-Type', 'application/json')
                 ->withBody($this->stream->createStream($json));
@@ -386,5 +391,29 @@ final class VatEndpoint
         }
 
         return $value;
+    }
+
+    /** @param VatValidationAddressInput|array<string,mixed>|null $addressInput */
+    private function normalizeAddressInput(VatValidationAddressInput|array|null $addressInput): array
+    {
+        if ($addressInput === null) {
+            return [];
+        }
+
+        if ($addressInput instanceof VatValidationAddressInput) {
+            return $addressInput->toArray();
+        }
+
+        return VatValidationAddressInput::fromArray($addressInput)->toArray();
+    }
+
+    /** @param array<string,mixed> $body */
+    private function encodeJsonBody(array $body): string
+    {
+        try {
+            return json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            throw new InvalidArgumentException('Failed to encode request body as JSON: '.$exception->getMessage(), 0, $exception);
+        }
     }
 }
