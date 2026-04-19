@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Taxora\Sdk;
@@ -142,7 +143,7 @@ final class TaxoraClient
             $res = $this->http->sendRequest(($this->authMw)(($this->apiKeyMw)($req)));
         }
         $this->assertStatus($res, [200]);
-        return json_decode((string)$res->getBody(), true);
+        return json_decode((string) $res->getBody(), true);
     }
 
     private function jsonPost(string $uri, array $body): array
@@ -162,11 +163,11 @@ final class TaxoraClient
         }
 
         if ($res->getStatusCode() === 422) {
-            throw new ValidationException((string)$res->getBody(), code: 422);
+            throw new ValidationException((string) $res->getBody(), code: 422);
         }
 
         $this->assertStatus($res, [200, 202]);
-        return json_decode((string)$res->getBody(), true);
+        return json_decode((string) $res->getBody(), true);
     }
 
     private function binaryGet(string $uri): string
@@ -178,7 +179,7 @@ final class TaxoraClient
             $res = $this->http->sendRequest(($this->authMw)(($this->apiKeyMw)($req)));
         }
         $this->assertStatus($res, [200]);
-        return (string)$res->getBody(); // PDF/ZIP content
+        return (string) $res->getBody(); // PDF/ZIP content
     }
 
     private function binaryPost(string $uri, array $body): string
@@ -197,7 +198,7 @@ final class TaxoraClient
             $res = $this->http->sendRequest(($this->authMw)(($this->apiKeyMw)($req)));
         }
         $this->assertStatus($res, [200]);
-        return (string)$res->getBody();
+        return (string) $res->getBody();
     }
 
     private function tryRefreshAndRetry(ResponseInterface $res): void
@@ -206,7 +207,7 @@ final class TaxoraClient
         try {
             $this->refresh();
         } catch (\Throwable) {
-            throw new AuthenticationException('Unauthorized and refresh failed: '.(string)$res->getBody(), 401);
+            throw new AuthenticationException('Unauthorized and refresh failed: ' . (string) $res->getBody(), 401);
         }
     }
 
@@ -214,7 +215,7 @@ final class TaxoraClient
     {
         if (!in_array($res->getStatusCode(), $allowed, true)) {
             $code = $res->getStatusCode();
-            $body = (string)$res->getBody();
+            $body = (string) $res->getBody();
             if ($code === 401) {
                 throw new AuthenticationException($body, 401);
             }

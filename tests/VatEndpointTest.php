@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 use GuzzleHttp\Psr7\Response;
@@ -8,11 +9,14 @@ use PHPUnit\Framework\TestCase;
 use Taxora\Sdk\Endpoints\VatEndpoint;
 use Taxora\Sdk\Enums\ApiVersion;
 use Taxora\Sdk\Enums\Language;
+use Taxora\Sdk\Exceptions\HttpException;
+use Taxora\Sdk\Exceptions\ValidationException;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
 use Taxora\Sdk\Http\InMemoryTokenStorage;
 use Taxora\Sdk\Tests\Fixtures\SequenceHttpClient;
 use Taxora\Sdk\ValueObjects\VatCertificateExport;
+use Taxora\Sdk\ValueObjects\VatResource;
 use Taxora\Sdk\ValueObjects\VatValidationAddressInput;
 
 final class VatEndpointTest extends TestCase
@@ -239,6 +243,85 @@ final class VatEndpointTest extends TestCase
         self::assertSame('1010', $payload['postalCode']);
         self::assertSame('Vienna', $payload['city']);
         self::assertSame('AT', $payload['countryCode']);
+    }
+
+    public function testValidateRetriesOnceOnGatewayTimeoutAndReturnsVatResource(): void
+    {
+        $html504 = '<html><body>via _upstream (504 -)</body></html>';
+        $http = new SequenceHttpClient([
+            new Response(504, ['Content-Type' => 'text/html'], $html504),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [
+                    'vat_uid' => 'ATU12345678',
+                    'state' => 'valid',
+                ],
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $endpoint = $this->createEndpoint($http);
+
+        $result = $endpoint->validate('ATU12345678', 'Example GmbH');
+
+        self::assertInstanceOf(VatResource::class, $result);
+        self::assertSame('ATU12345678', $result->vat_uid);
+        self::assertCount(2, $http->requests);
+    }
+
+    public function testValidateThrowsCleanMessageAfterSecondGatewayTimeout(): void
+    {
+        $html504 = '<html><body>via _upstream (504 -)</body></html>';
+        $http = new SequenceHttpClient([
+            new Response(504, ['Content-Type' => 'text/html'], $html504),
+            new Response(504, ['Content-Type' => 'text/html'], $html504),
+        ]);
+
+        $endpoint = $this->createEndpoint($http);
+
+        try {
+            $endpoint->validate('ATU12345678');
+            $this->fail('Expected HttpException to be thrown.');
+        } catch (HttpException $exception) {
+            self::assertSame(504, $exception->getStatusCode());
+            self::assertSame('Taxora VAT validation request timed out (HTTP 504).', $exception->getMessage());
+            self::assertSame($html504, $exception->getResponseBody());
+            self::assertCount(2, $http->requests);
+        }
+    }
+
+    public function testValidateDoesNotRetryOnNonGatewayHttpError(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(500, ['Content-Type' => 'text/plain'], 'server error'),
+        ]);
+
+        $endpoint = $this->createEndpoint($http);
+
+        try {
+            $endpoint->validate('ATU12345678');
+            $this->fail('Expected HttpException to be thrown.');
+        } catch (HttpException $exception) {
+            self::assertSame(500, $exception->getStatusCode());
+            self::assertSame('server error', $exception->getMessage());
+            self::assertCount(1, $http->requests);
+        }
+    }
+
+    public function testValidateDoesNotRetryOnValidationError(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(422, ['Content-Type' => 'application/json'], '{"message":"invalid vat"}'),
+        ]);
+
+        $endpoint = $this->createEndpoint($http);
+
+        try {
+            $endpoint->validate('ATU12345678');
+            $this->fail('Expected ValidationException to be thrown.');
+        } catch (ValidationException $exception) {
+            self::assertSame(422, $exception->getCode());
+            self::assertCount(1, $http->requests);
+        }
     }
 
     public function testValidateRejectsUnsupportedAddressInputField(): void

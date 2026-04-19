@@ -19,10 +19,13 @@ jobs:
         run: php -d xdebug.mode=off vendor/bin/phpunit --colors=always
       - name: Static Analysis (Psalm)
         if: always()
-        run: php -d xdebug.mode=off vendor/bin/psalm --no-cache --output-format=github
-      - name: Coding Style (PHP-CS-Fixer version)
+        run: php -d xdebug.mode=off vendor/bin/psalm --no-cache --threads=1 --output-format=github
+      - name: Static Analysis (PHPStan)
         if: always()
-        run: vendor/bin/php-cs-fixer --version
+        run: vendor/bin/phpstan analyse src tests --memory-limit=512M
+      - name: Coding Style
+        if: always()
+        run: vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --dry-run --diff --verbose --sequential
 
   static-analysis:
     runs-on: ubuntu-latest
@@ -36,4 +39,8 @@ jobs:
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction --no-progress
       - name: Static Analysis (Psalm)
-        run: php -d xdebug.mode=off vendor/bin/psalm --no-cache --output-format=github
+        run: php -d xdebug.mode=off vendor/bin/psalm --no-cache --threads=1 --output-format=github
+      - name: Static Analysis (PHPStan)
+        run: vendor/bin/phpstan analyse src tests --memory-limit=512M
+      - name: Coding Style
+        run: vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --dry-run --diff --verbose --sequential

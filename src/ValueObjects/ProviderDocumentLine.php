@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Taxora\Sdk\ValueObjects;
@@ -18,8 +19,7 @@ final readonly class ProviderDocumentLine
         public ?string $entry_identifier,
         public ?string $reference,
         public ?array $meta,
-    ) {
-    }
+    ) {}
 
     public static function fromArray(mixed $data): ?self
     {

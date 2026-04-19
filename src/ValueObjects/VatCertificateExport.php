@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Taxora\Sdk\ValueObjects;
@@ -13,8 +14,7 @@ final readonly class VatCertificateExport
     public function __construct(
         public string $exportId,
         public ?string $message
-    ) {
-    }
+    ) {}
 
     /**
      * @param array<string,mixed> $data

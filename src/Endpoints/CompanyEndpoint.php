@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Taxora\Sdk\Endpoints;
@@ -92,7 +93,7 @@ final class CompanyEndpoint
         try {
             ($this->refreshCallback)();
         } catch (Throwable $exception) {
-            throw new AuthenticationException('Unauthorized and refresh failed: '.$body, 401, $exception);
+            throw new AuthenticationException('Unauthorized and refresh failed: ' . $body, 401, $exception);
         }
     }
 }

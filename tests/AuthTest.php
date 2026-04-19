@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 use GuzzleHttp\Psr7\Response;
@@ -181,7 +182,7 @@ final class AuthTest extends TestCase
     {
         $responses = [new Response(401, ['Content-Type' => 'application/json'], json_encode([
             'success' => 0,
-            'message' => 'invalid credentials'
+            'message' => 'invalid credentials',
         ], JSON_UNESCAPED_SLASHES))];
 
         $client = new ArrayHttpClient($responses);
@@ -220,7 +221,7 @@ final class AuthTest extends TestCase
     {
         $responses = [new Response(500, ['Content-Type' => 'application/json'], json_encode([
             'success' => 0,
-            'message' => 'server down'
+            'message' => 'server down',
         ], JSON_UNESCAPED_SLASHES))];
 
         $client = new ArrayHttpClient($responses);
@@ -254,7 +255,7 @@ final class AuthTest extends TestCase
     {
         $responses = [new Response(401, ['Content-Type' => 'application/json'], json_encode([
             'success' => 0,
-            'message' => 'invalid credentials'
+            'message' => 'invalid credentials',
         ], JSON_UNESCAPED_SLASHES))];
 
         $client = new ArrayHttpClient($responses);
@@ -290,7 +291,7 @@ final class AuthTest extends TestCase
     {
         $responses = [new Response(401, ['Content-Type' => 'application/json'], json_encode([
             'success' => 0,
-            'message' => 'token expired'
+            'message' => 'token expired',
         ], JSON_UNESCAPED_SLASHES))];
 
         $client = new ArrayHttpClient($responses);
@@ -331,7 +332,7 @@ final class AuthTest extends TestCase
     {
         $responses = [new Response(500, ['Content-Type' => 'application/json'], json_encode([
             'success' => 0,
-            'message' => 'service unavailable'
+            'message' => 'service unavailable',
         ], JSON_UNESCAPED_SLASHES))];
 
         $client = new ArrayHttpClient($responses);

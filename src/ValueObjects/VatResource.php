@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Taxora\Sdk\ValueObjects;
@@ -39,8 +40,7 @@ final readonly class VatResource
         public ?string $provider_note = null,
         public ?\DateTimeImmutable $provider_last_checked_at = null,
         public ?ProviderDocument $provider_document = null,
-    ) {
-    }
+    ) {}
 
     /**
      * @param  array<string, mixed>  $data
@@ -60,7 +60,7 @@ final readonly class VatResource
                 : null,
             requested_input_address: self::normalizeRequestedInputAddress($data['requested_input_address'] ?? null),
             checked_at: isset($data['checked_at']) ? new \DateTimeImmutable($data['checked_at']) : null,
-            score: isset($data['score']) ? (float)$data['score'] : null,
+            score: isset($data['score']) ? (float) $data['score'] : null,
             score_source: isset($data['score_source']) && is_string($data['score_source']) ? $data['score_source'] : null,
             score_attempts: self::normalizeScoreAttempts($data['score_attempts'] ?? null),
             breakdown: self::hydrateBreakdown($data['breakdown'] ?? null),
@@ -113,7 +113,7 @@ final readonly class VatResource
             'score_attempts'          => $this->score_attempts,
             'breakdown'               => $this->breakdown === null
                 ? null
-                : array_map(static fn (ScoreBreakdown $item) => $item->toArray(), $this->breakdown),
+                : array_map(static fn(ScoreBreakdown $item) => $item->toArray(), $this->breakdown),
             'environment'             => $this->environment,
             'provider'                => $this->provider,
             'used_providers'          => $this->used_providers,

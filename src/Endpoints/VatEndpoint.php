@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Taxora\Sdk\Endpoints;
@@ -49,17 +50,16 @@ final class VatEndpoint
         ?string $companyName = null,
         ?string $provider = null,
         VatValidationAddressInput|array|null $addressInput = null
-    ): VatResource
-    {
+    ): VatResource {
         $uri = $this->uri('/vat/validate');
         $body = array_filter([
             'vat_uid' => $vatUid,
             'company_name' => $companyName,
             'provider' => $provider,
-        ], fn ($v) => $v !== null);
+        ], fn($v) => $v !== null);
         $body = [...$body, ...$this->normalizeAddressInput($addressInput)];
 
-        $payload = $this->jsonPost($uri, $body);
+        $payload = $this->validateWithGatewayRetry($uri, $body);
         $data = $this->extractData($payload);
         if ($companyName !== null && !isset($data['requested_company_name'])) {
             $data['requested_company_name'] = $companyName;
@@ -76,7 +76,7 @@ final class VatEndpoint
             'vat_uids'      => array_values($vatUids),
             'company_names' => $companyNames !== null ? array_values($companyNames) : null,
             'provider'      => $provider,
-        ], fn ($v) => $v !== null);
+        ], fn($v) => $v !== null);
 
         $payload = $this->jsonPost($uri, $body);
         if ($companyNames !== null) {
@@ -150,7 +150,7 @@ final class VatEndpoint
     public function certificate(string $uuid, ?Language $lang = null): string
     {
         $uri = $this->uri('/vat/certificate');
-        $body = array_filter(['uuid' => $uuid, 'lang' => $lang?->value], fn ($v) => $v !== null);
+        $body = array_filter(['uuid' => $uuid, 'lang' => $lang?->value], fn($v) => $v !== null);
         return $this->binaryPost($uri, $body);
     }
 
@@ -163,7 +163,7 @@ final class VatEndpoint
             'to_date'   => $this->formatDate($toDate),
             'countries' => $countries,
             'lang'      => $lang?->value,
-        ], fn ($v) => $v !== null);
+        ], fn($v) => $v !== null);
         $payload = $this->jsonPost($uri, $body); // 202 Accepted with export_id
         $data = $this->extractData($payload);
 
@@ -179,7 +179,7 @@ final class VatEndpoint
             'to_date'   => $this->formatDate($toDate),
             'countries' => $countries,
             'lang'      => $lang?->value,
-        ], fn ($v) => $v !== null);
+        ], fn($v) => $v !== null);
         $payload = $this->jsonPost($uri, $body); // 202 Accepted with export_id
         $data = $this->extractData($payload);
 
@@ -189,7 +189,7 @@ final class VatEndpoint
     /** Bulk download ZIP or PDF (binary string) */
     public function downloadBulkExport(string $exportId): string
     {
-        $uri = $this->uri('/vat/certificates/download/'.rawurlencode($exportId));
+        $uri = $this->uri('/vat/certificates/download/' . rawurlencode($exportId));
         return $this->binaryGet($uri);
     }
 
@@ -202,7 +202,7 @@ final class VatEndpoint
 
     private function jsonGet(string $uri): array
     {
-        $response = $this->send(fn () => $this->req->createRequest('GET', $uri));
+        $response = $this->send(fn() => $this->req->createRequest('GET', $uri));
         $code = $response->getStatusCode();
         $body = (string) $response->getBody();
 
@@ -241,9 +241,36 @@ final class VatEndpoint
         return $payload;
     }
 
+    /** @param array<string,mixed> $body */
+    private function validateWithGatewayRetry(string $uri, array $body): array
+    {
+        try {
+            return $this->jsonPost($uri, $body);
+        } catch (HttpException $exception) {
+            if ($exception->getStatusCode() !== 504) {
+                throw $exception;
+            }
+        }
+
+        try {
+            return $this->jsonPost($uri, $body);
+        } catch (HttpException $exception) {
+            if ($exception->getStatusCode() !== 504) {
+                throw $exception;
+            }
+
+            throw new HttpException(
+                'Taxora VAT validation request timed out (HTTP 504).',
+                504,
+                $exception->getResponseBody(),
+                previous: $exception
+            );
+        }
+    }
+
     private function binaryGet(string $uri): string
     {
-        $response = $this->send(fn () => $this->req->createRequest('GET', $uri));
+        $response = $this->send(fn() => $this->req->createRequest('GET', $uri));
         $code = $response->getStatusCode();
         if ($code !== 200) {
             throw new HttpException((string) $response->getBody(), $code);
@@ -314,7 +341,7 @@ final class VatEndpoint
         try {
             ($this->refreshCallback)();
         } catch (Throwable $exception) {
-            throw new AuthenticationException('Unauthorized and refresh failed: '.$body, 401, $exception);
+            throw new AuthenticationException('Unauthorized and refresh failed: ' . $body, 401, $exception);
         }
     }
 
@@ -413,7 +440,7 @@ final class VatEndpoint
         try {
             return json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         } catch (\JsonException $exception) {
-            throw new InvalidArgumentException('Failed to encode request body as JSON: '.$exception->getMessage(), 0, $exception);
+            throw new InvalidArgumentException('Failed to encode request body as JSON: ' . $exception->getMessage(), 0, $exception);
         }
     }
 }

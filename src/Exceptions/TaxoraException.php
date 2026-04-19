@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Taxora\Sdk\Exceptions;
@@ -6,7 +7,6 @@ namespace Taxora\Sdk\Exceptions;
 use Exception;
 use Throwable;
 
-/** @phpstan-ignore-next-line */
 final class TaxoraException extends Exception
 {
     protected array $context;

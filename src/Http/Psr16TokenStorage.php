@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Taxora\Sdk\Http;
@@ -16,8 +17,7 @@ final readonly class Psr16TokenStorage implements TokenStorageInterface
     public function __construct(
         private CacheInterface $cache,
         private string $cacheKey = 'taxora_sdk_token'
-    ) {
-    }
+    ) {}
 
     public function get(): ?Token
     {
@@ -37,7 +37,7 @@ final readonly class Psr16TokenStorage implements TokenStorageInterface
         ], $token->expiresAt->getTimestamp() - time());
     }
 
-    #[ Override]
+    #[Override]
     public function clear(): void
     {
         $this->cache->delete($this->cacheKey);

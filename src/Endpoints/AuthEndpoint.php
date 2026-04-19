@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Taxora\Sdk\Endpoints;
@@ -27,8 +28,7 @@ final class AuthEndpoint
         private readonly TokenStorageInterface $store,
         private readonly string $baseUrl,
         private readonly ApiVersion $apiVersion = ApiVersion::V1
-    ) {
-    }
+    ) {}
 
     /** Perform login and persist the received token. */
     public function login(
@@ -55,13 +55,13 @@ final class AuthEndpoint
         $res = $this->http->sendRequest($req);
         $status = $res->getStatusCode();
         if ($status === 401) {
-            throw new AuthenticationException((string)$res->getBody(), 401);
+            throw new AuthenticationException((string) $res->getBody(), 401);
         }
         if ($status !== 200) {
-            throw new HttpException((string)$res->getBody(), $status, (string)$res->getBody());
+            throw new HttpException((string) $res->getBody(), $status, (string) $res->getBody());
         }
 
-        $payload = (array) json_decode((string)$res->getBody(), true);
+        $payload = (array) json_decode((string) $res->getBody(), true);
         if (!$this->isSuccessfulResponse($payload)) {
             throw new AuthenticationException('Authentication failed.', 401);
         }
@@ -91,13 +91,13 @@ final class AuthEndpoint
         $res = $this->http->sendRequest($req);
         $status = $res->getStatusCode();
         if ($status === 401) {
-            throw new AuthenticationException((string)$res->getBody(), 401);
+            throw new AuthenticationException((string) $res->getBody(), 401);
         }
         if ($status !== 200) {
-            throw new HttpException((string)$res->getBody(), $status, (string)$res->getBody());
+            throw new HttpException((string) $res->getBody(), $status, (string) $res->getBody());
         }
 
-        $payload = (array) json_decode((string)$res->getBody(), true);
+        $payload = (array) json_decode((string) $res->getBody(), true);
         $token = $this->hydrateToken($payload);
         $this->store->set($token);
 
@@ -110,15 +110,15 @@ final class AuthEndpoint
             $payload = $payload['data'];
         }
 
-        $accessToken = (string)($payload['access_token'] ?? '');
+        $accessToken = (string) ($payload['access_token'] ?? '');
         $accessToken = preg_replace('/^Bearer\s+/i', '', $accessToken) ?? $accessToken;
-        $tokenType = (string)($payload['token_type'] ?? 'Bearer');
-        $expiresIn = (int)($payload['expires_in'] ?? 3600);
+        $tokenType = (string) ($payload['token_type'] ?? 'Bearer');
+        $expiresIn = (int) ($payload['expires_in'] ?? 3600);
 
         return new Token(
             accessToken: $accessToken,
             tokenType: $tokenType,
-            expiresAt: (new DateTimeImmutable())->modify('+'.$expiresIn.' seconds')
+            expiresAt: (new DateTimeImmutable())->modify('+' . $expiresIn . ' seconds')
         );
     }
 

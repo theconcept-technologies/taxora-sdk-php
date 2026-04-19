@@ -1,6 +1,6 @@
 <?php
-declare(strict_types=1);
 
+declare(strict_types=1);
 
 namespace Taxora\Sdk\Http;
 
@@ -13,7 +13,9 @@ final readonly class AuthMiddleware
     public function __invoke(RequestInterface $request): RequestInterface
     {
         $token = $this->store->get();
-        if (!$token) { return $request; } // login/refresh calls
-        return $request->withHeader('Authorization', $token->tokenType.' '.$token->accessToken);
+        if (!$token) {
+            return $request;
+        }
+        return $request->withHeader('Authorization', $token->tokenType . ' ' . $token->accessToken);
     }
 }
