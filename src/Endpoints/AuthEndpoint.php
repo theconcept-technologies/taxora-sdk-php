@@ -28,7 +28,8 @@ final class AuthEndpoint
         private readonly TokenStorageInterface $store,
         private readonly string $baseUrl,
         private readonly ApiVersion $apiVersion = ApiVersion::V1
-    ) {}
+    ) {
+    }
 
     /** Perform login and persist the received token. */
     public function login(

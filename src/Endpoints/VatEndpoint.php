@@ -56,7 +56,7 @@ final class VatEndpoint
             'vat_uid' => $vatUid,
             'company_name' => $companyName,
             'provider' => $provider,
-        ], fn($v) => $v !== null);
+        ], fn ($v) => $v !== null);
         $body = [...$body, ...$this->normalizeAddressInput($addressInput)];
 
         $payload = $this->validateWithGatewayRetry($uri, $body);
@@ -76,7 +76,7 @@ final class VatEndpoint
             'vat_uids'      => array_values($vatUids),
             'company_names' => $companyNames !== null ? array_values($companyNames) : null,
             'provider'      => $provider,
-        ], fn($v) => $v !== null);
+        ], fn ($v) => $v !== null);
 
         $payload = $this->jsonPost($uri, $body);
         if ($companyNames !== null) {
@@ -150,7 +150,7 @@ final class VatEndpoint
     public function certificate(string $uuid, ?Language $lang = null): string
     {
         $uri = $this->uri('/vat/certificate');
-        $body = array_filter(['uuid' => $uuid, 'lang' => $lang?->value], fn($v) => $v !== null);
+        $body = array_filter(['uuid' => $uuid, 'lang' => $lang?->value], fn ($v) => $v !== null);
         return $this->binaryPost($uri, $body);
     }
 
@@ -163,7 +163,7 @@ final class VatEndpoint
             'to_date'   => $this->formatDate($toDate),
             'countries' => $countries,
             'lang'      => $lang?->value,
-        ], fn($v) => $v !== null);
+        ], fn ($v) => $v !== null);
         $payload = $this->jsonPost($uri, $body); // 202 Accepted with export_id
         $data = $this->extractData($payload);
 
@@ -179,7 +179,7 @@ final class VatEndpoint
             'to_date'   => $this->formatDate($toDate),
             'countries' => $countries,
             'lang'      => $lang?->value,
-        ], fn($v) => $v !== null);
+        ], fn ($v) => $v !== null);
         $payload = $this->jsonPost($uri, $body); // 202 Accepted with export_id
         $data = $this->extractData($payload);
 
@@ -202,7 +202,7 @@ final class VatEndpoint
 
     private function jsonGet(string $uri): array
     {
-        $response = $this->send(fn() => $this->req->createRequest('GET', $uri));
+        $response = $this->send(fn () => $this->req->createRequest('GET', $uri));
         $code = $response->getStatusCode();
         $body = (string) $response->getBody();
 
@@ -270,7 +270,7 @@ final class VatEndpoint
 
     private function binaryGet(string $uri): string
     {
-        $response = $this->send(fn() => $this->req->createRequest('GET', $uri));
+        $response = $this->send(fn () => $this->req->createRequest('GET', $uri));
         $code = $response->getStatusCode();
         if ($code !== 200) {
             throw new HttpException((string) $response->getBody(), $code);

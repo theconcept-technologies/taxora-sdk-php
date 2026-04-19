@@ -16,7 +16,8 @@ final readonly class ScoreBreakdown
         public string $stepName,
         public float $scoreContribution,
         public array $metadata = []
-    ) {}
+    ) {
+    }
 
     /**
      * @param array<string, mixed> $data

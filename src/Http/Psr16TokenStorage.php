@@ -17,7 +17,8 @@ final readonly class Psr16TokenStorage implements TokenStorageInterface
     public function __construct(
         private CacheInterface $cache,
         private string $cacheKey = 'taxora_sdk_token'
-    ) {}
+    ) {
+    }
 
     public function get(): ?Token
     {

@@ -40,7 +40,8 @@ final readonly class VatResource
         public ?string $provider_note = null,
         public ?\DateTimeImmutable $provider_last_checked_at = null,
         public ?ProviderDocument $provider_document = null,
-    ) {}
+    ) {
+    }
 
     /**
      * @param  array<string, mixed>  $data
@@ -113,7 +114,7 @@ final readonly class VatResource
             'score_attempts'          => $this->score_attempts,
             'breakdown'               => $this->breakdown === null
                 ? null
-                : array_map(static fn(ScoreBreakdown $item) => $item->toArray(), $this->breakdown),
+                : array_map(static fn (ScoreBreakdown $item) => $item->toArray(), $this->breakdown),
             'environment'             => $this->environment,
             'provider'                => $this->provider,
             'used_providers'          => $this->used_providers,

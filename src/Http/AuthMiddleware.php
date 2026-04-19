@@ -8,7 +8,9 @@ use Psr\Http\Message\RequestInterface;
 
 final readonly class AuthMiddleware
 {
-    public function __construct(private TokenStorageInterface $store) {}
+    public function __construct(private TokenStorageInterface $store)
+    {
+    }
 
     public function __invoke(RequestInterface $request): RequestInterface
     {

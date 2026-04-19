@@ -33,7 +33,8 @@ final class CompanyTest extends TestCase
             new ApiKeyMiddleware('api-key'),
             new AuthMiddleware($store),
             $store,
-            static function (): void {},
+            static function (): void {
+            },
             'https://sandbox.taxora.io'
         );
 
@@ -63,7 +64,8 @@ final class CompanyTest extends TestCase
             new ApiKeyMiddleware('api-key'),
             new AuthMiddleware($store),
             $store,
-            static function (): void {},
+            static function (): void {
+            },
             'https://sandbox.taxora.io'
         );
 

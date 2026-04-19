@@ -34,7 +34,11 @@
           "@php -r \"echo '▶ Running PHPUnit'.PHP_EOL;\"",
           "XDEBUG_MODE=coverage php vendor/bin/phpunit",
           "@php -r \"echo '▶ Running Psalm (no cache)'.PHP_EOL;\"",
-          "php -d xdebug.mode=off vendor/bin/psalm --no-cache --threads=1"
+          "php -d xdebug.mode=off vendor/bin/psalm --no-cache --threads=1",
+          "@php -r \"echo '▶ Running PHPStan'.PHP_EOL;\"",
+          "vendor/bin/phpstan analyse src tests --memory-limit=512M",
+          "@php -r \"echo '▶ Running PHP CS Fixer (dry-run)'.PHP_EOL;\"",
+          "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --dry-run --diff --verbose --sequential"
       ],
       "psalm": "php -d xdebug.mode=off vendor/bin/psalm --no-cache --threads=1",
       "phpstan": "vendor/bin/phpstan analyse src tests --memory-limit=512M",

@@ -8,7 +8,9 @@ use Psr\Http\Message\RequestInterface;
 
 final readonly class ApiKeyMiddleware
 {
-    public function __construct(private string $apiKey) {}
+    public function __construct(private string $apiKey)
+    {
+    }
 
     public function __invoke(RequestInterface $request): RequestInterface
     {

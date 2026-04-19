@@ -37,7 +37,7 @@ final class CompanyEndpoint
     public function get(): array
     {
         $uri = sprintf('%s/%s/company', $this->baseUrl, $this->apiVersion->value);
-        $response = $this->send(fn() => $this->req->createRequest('GET', $uri));
+        $response = $this->send(fn () => $this->req->createRequest('GET', $uri));
 
         if ($response->getStatusCode() !== 200) {
             throw new HttpException((string) $response->getBody(), $response->getStatusCode());

@@ -28,7 +28,7 @@ final class TaxoraClientFactoryTest extends TestCase
 
     public function testCreateUsesProvidedOverrides(): void
     {
-        $http = new class implements ClientInterface {
+        $http = new class () implements ClientInterface {
             public array $requests = [];
 
             public function sendRequest(RequestInterface $request): ResponseInterface

@@ -12,7 +12,8 @@ final readonly class Token
         public string $accessToken,
         public string $tokenType,
         public DateTimeImmutable $expiresAt
-    ) {}
+    ) {
+    }
 
     public function isExpired(DateTimeImmutable $now = new DateTimeImmutable()): bool
     {

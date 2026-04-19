@@ -395,7 +395,8 @@ final class VatEndpointTest extends TestCase
             apiKey: new ApiKeyMiddleware('test-key'),
             auth: new AuthMiddleware($tokenStorage),
             tokens: $tokenStorage,
-            refreshCallback: static function (): void {},
+            refreshCallback: static function (): void {
+            },
             baseUrl: 'https://sandbox.taxora.io',
             apiVersion: ApiVersion::V1
         );

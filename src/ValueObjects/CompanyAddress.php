@@ -200,7 +200,7 @@ final readonly class CompanyAddress
     {
         $filtered = array_filter(
             $data,
-            static fn($value) => is_scalar($value) && trim((string) $value) !== ''
+            static fn ($value) => is_scalar($value) && trim((string) $value) !== ''
         );
 
         if ($filtered === []) {
