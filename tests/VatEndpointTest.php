@@ -182,13 +182,16 @@ final class VatEndpointTest extends TestCase
                     'vat_uid' => 'ATU12345678',
                     'state' => 'valid',
                     'requested_company_name' => 'Example Company GmbH',
+                    'has_api_error' => true,
+                    'error_message' => 'Official registry temporarily unavailable.',
+                    'next_api_recheck_at' => '2026-04-24T14:00:00Z',
                 ],
             ], JSON_UNESCAPED_SLASHES)),
         ]);
 
         $endpoint = $this->createEndpoint($http);
 
-        $endpoint->validate(
+        $result = $endpoint->validate(
             'ATU12345678',
             'John Doe',
             'vies',
@@ -200,6 +203,10 @@ final class VatEndpointTest extends TestCase
                 'countryCode' => 'at',
             ]
         );
+
+        self::assertTrue($result->has_api_error);
+        self::assertSame('Official registry temporarily unavailable.', $result->error_message);
+        self::assertSame('2026-04-24T14:00:00Z', $result->next_api_recheck_at);
 
         self::assertCount(1, $http->requests);
         $payload = json_decode((string) $http->requests[0]->getBody(), true);

@@ -47,6 +47,9 @@ final class VatTest extends TestCase
             'provider_vat_state' => 'VALID',
             'provider_note' => 'Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).',
             'provider_last_checked_at' => '2024-01-19T13:15:00Z',
+            'has_api_error' => true,
+            'error_message' => 'VIES service unavailable.',
+            'next_api_recheck_at' => '2026-04-24T14:00:00Z',
         ];
         $vo = VatResource::fromArray($data);
 
@@ -80,6 +83,9 @@ final class VatTest extends TestCase
             $vo->provider_note
         );
         self::assertSame('2024-01-19T13:15:00+00:00', $vo->provider_last_checked_at?->format(DATE_ATOM));
+        self::assertTrue($vo->has_api_error);
+        self::assertSame('VIES service unavailable.', $vo->error_message);
+        self::assertSame('2026-04-24T14:00:00Z', $vo->next_api_recheck_at);
     }
 
     public function testVatResourceMapsProviderDocument(): void
@@ -178,6 +184,9 @@ final class VatTest extends TestCase
             'used_providers' => '["fon", "vies", ""]',
             'provider_vat_state' => 'INVALID',
             'provider_note' => 'Upstream could not confirm VAT.',
+            'has_api_error' => true,
+            'error_message' => 'Official registry temporarily unavailable.',
+            'next_api_recheck_at' => '2026-04-24T14:00:00Z',
         ]);
 
         $payload = $vo->toArray();
@@ -189,6 +198,21 @@ final class VatTest extends TestCase
         self::assertSame('2024-01-11T09:30:00+00:00', $payload['provider_last_checked_at']);
         self::assertSame('2024-01-10T08:00:00+00:00', $payload['checked_at']);
         self::assertSame('SANDBOX', $payload['environment']);
+        self::assertTrue($payload['has_api_error']);
+        self::assertSame('Official registry temporarily unavailable.', $payload['error_message']);
+        self::assertSame('2026-04-24T14:00:00Z', $payload['next_api_recheck_at']);
+    }
+
+    public function testVatResourceLeavesMissingApiErrorMetadataNullable(): void
+    {
+        $vo = VatResource::fromArray([
+            'vat_uid' => 'ATU00000000',
+            'state' => VatState::INVALID->value,
+        ]);
+
+        self::assertNull($vo->has_api_error);
+        self::assertNull($vo->error_message);
+        self::assertNull($vo->next_api_recheck_at);
     }
 
     public function testVatResourceMapsAddressFallbackResponseFields(): void

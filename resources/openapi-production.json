@@ -328,6 +328,16 @@
                                     "name": {
                                         "type": "string",
                                         "example": "Updated Company Name"
+                                    },
+                                    "vat_history_valid_threshold_use_global": {
+                                        "type": "boolean",
+                                        "example": false
+                                    },
+                                    "vat_history_valid_threshold": {
+                                        "type": "integer",
+                                        "maximum": 100,
+                                        "minimum": 0,
+                                        "example": 60
                                     }
                                 },
                                 "type": "object"
@@ -369,6 +379,55 @@
                     },
                     "500": {
                         "description": "Server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/company/ai-score-threshold": {
+            "post": {
+                "tags": [
+                    "Company"
+                ],
+                "summary": "Update company AI score threshold",
+                "description": "Updates only the company VAT history valid threshold override",
+                "operationId": "4f65b229ffee76134e71128bf8b1cbff",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "vat_history_valid_threshold"
+                                ],
+                                "properties": {
+                                    "vat_history_valid_threshold": {
+                                        "type": "integer",
+                                        "maximum": 100,
+                                        "minimum": 0,
+                                        "example": 60,
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "AI score threshold updated successfully"
+                    },
+                    "400": {
+                        "description": "Validation failed"
+                    },
+                    "403": {
+                        "description": "Not enough permissions"
                     }
                 },
                 "security": [
@@ -636,6 +695,139 @@
                         "ApiKeyAuth": []
                     }
                 ]
+            }
+        },
+        "/v1/partners/shopify/provision": {
+            "post": {
+                "tags": [
+                    "Partners"
+                ],
+                "summary": "Provision or fetch Shopify tenant",
+                "description": "Server-to-server endpoint. Requires partner HMAC signature headers.",
+                "operationId": "024ce11f464f12fd57be04eb5d3d376e",
+                "parameters": [
+                    {
+                        "name": "x-partner-key",
+                        "in": "header",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "x-timestamp",
+                        "in": "header",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "x-nonce",
+                        "in": "header",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "x-signature",
+                        "in": "header",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "shop_domain",
+                                    "shop_id"
+                                ],
+                                "properties": {
+                                    "shop_domain": {
+                                        "type": "string",
+                                        "example": "example.myshopify.com"
+                                    },
+                                    "shop_id": {
+                                        "type": "integer",
+                                        "format": "int64",
+                                        "example": 1234567890
+                                    },
+                                    "owner_email": {
+                                        "type": "string",
+                                        "example": "owner@example.com",
+                                        "nullable": true
+                                    },
+                                    "country_code": {
+                                        "type": "string",
+                                        "example": "AT",
+                                        "nullable": true
+                                    },
+                                    "locale": {
+                                        "type": "string",
+                                        "example": "de-AT",
+                                        "nullable": true
+                                    },
+                                    "app_installation_id": {
+                                        "type": "string",
+                                        "example": "gid://shopify/AppInstallation/123",
+                                        "nullable": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Provisioned"
+                    },
+                    "400": {
+                        "description": "Invalid payload"
+                    },
+                    "401": {
+                        "description": "Invalid signature"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "409": {
+                        "description": "Shop mismatch"
+                    },
+                    "429": {
+                        "description": "Rate limited"
+                    }
+                }
+            }
+        },
+        "/v1/partners/shopify/rotate-secret": {
+            "post": {
+                "tags": [
+                    "Partners"
+                ],
+                "summary": "Rotate Shopify tenant OAuth secret",
+                "description": "Server-to-server endpoint. Requires partner HMAC signature headers.",
+                "operationId": "f91ad037238a0be2194b386b7820627a",
+                "responses": {
+                    "200": {
+                        "description": "Secret rotated"
+                    },
+                    "400": {
+                        "description": "Invalid payload"
+                    },
+                    "401": {
+                        "description": "Invalid signature"
+                    },
+                    "404": {
+                        "description": "Shop not found"
+                    }
+                }
             }
         },
         "/v1/reports": {
@@ -1241,13 +1433,39 @@
                 ]
             }
         },
+        "/v1/tenants/me/entitlements": {
+            "get": {
+                "tags": [
+                    "Tenant"
+                ],
+                "summary": "Get tenant entitlements and quota",
+                "operationId": "1fe39dd17d02efe57675f1346f2a1d6a",
+                "responses": {
+                    "200": {
+                        "description": "Entitlements"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "500": {
+                        "description": "Server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": [],
+                        "ApiKeyAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/vat/validate": {
             "post": {
                 "tags": [
                     "VAT"
                 ],
                 "summary": "Validate a VAT UID",
-                "description": "Checks if a VAT UID is valid. If the AI company-name score is near zero and addressLine1 is provided, Taxora retries scoring by using addressLine1 as company-name candidate and keeps the better deterministic result.",
+                "description": "Checks if a VAT UID is valid. If the AI company-name score is near zero and addressLine1 or addressLine2 is provided, Taxora retries scoring with the address line candidate and keeps the better deterministic result.",
                 "operationId": "43a39536cf6714e12f99cf2910b92043",
                 "requestBody": {
                     "required": true,
@@ -1321,16 +1539,51 @@
                                         "provider": "vies"
                                     }
                                 },
-                                "addressLineFallback": {
-                                    "summary": "Fallback case: company is in addressLine1",
+                                "addressLine1FallbackWins": {
+                                    "summary": "Sandbox: addressLine1 fallback wins",
                                     "value": {
-                                        "vat_uid": "ATU12345678",
+                                        "vat_uid": "ATU44000001",
                                         "company_name": "John Doe",
-                                        "addressLine1": "Example Company GmbH",
-                                        "postalCode": "1010",
-                                        "city": "Vienna",
+                                        "addressLine1": "Fallback Line One Trading GmbH",
+                                        "postalCode": "1020",
+                                        "city": "Wien",
                                         "countryCode": "AT",
-                                        "provider": "vies"
+                                        "provider": "sandbox"
+                                    }
+                                },
+                                "addressLine2FallbackWins": {
+                                    "summary": "Sandbox: addressLine2 fallback wins",
+                                    "value": {
+                                        "vat_uid": "DE440000002",
+                                        "company_name": "John Doe",
+                                        "addressLine2": "Fallback Line Two Systems GmbH",
+                                        "postalCode": "20095",
+                                        "city": "Hamburg",
+                                        "countryCode": "DE",
+                                        "provider": "sandbox"
+                                    }
+                                },
+                                "fallbackAttemptedPrimaryKept": {
+                                    "summary": "Sandbox: fallback attempted but primary kept",
+                                    "value": {
+                                        "vat_uid": "FR44000000003",
+                                        "company_name": "John Doe",
+                                        "addressLine1": "45 Avenue des Tests",
+                                        "postalCode": "69002",
+                                        "city": "Lyon",
+                                        "countryCode": "FR",
+                                        "provider": "sandbox"
+                                    }
+                                },
+                                "noFallbackHelp": {
+                                    "summary": "Sandbox: no fallback help",
+                                    "value": {
+                                        "vat_uid": "IT44000000004",
+                                        "company_name": "John Doe",
+                                        "postalCode": "40121",
+                                        "city": "Bologna",
+                                        "countryCode": "IT",
+                                        "provider": "sandbox"
                                     }
                                 }
                             }
@@ -2637,11 +2890,37 @@
                     },
                     "rate_limit": {
                         "type": "integer",
+                        "deprecated": true,
+                        "example": 100
+                    },
+                    "api_rate_limit": {
+                        "type": "integer",
+                        "example": 100
+                    },
+                    "vat_rate_limit": {
+                        "type": "integer",
                         "example": 100
                     },
                     "state": {
                         "type": "string",
                         "example": "active"
+                    },
+                    "source": {
+                        "type": "string",
+                        "example": "web"
+                    },
+                    "source_ref": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "vat_history_valid_threshold_override": {
+                        "type": "integer",
+                        "example": 60,
+                        "nullable": true
+                    },
+                    "vat_history_valid_threshold_effective": {
+                        "type": "integer",
+                        "example": 50
                     },
                     "subscription_plan": {
                         "type": "string",
@@ -2678,7 +2957,15 @@
                             "DE123456789",
                             "FR99345678901",
                             "IT12398765432",
-                            "GB999999973"
+                            "GB999999973",
+                            "ATU44000001",
+                            "DE440000002",
+                            "FR44000000003",
+                            "IT44000000004",
+                            "ATU00000000",
+                            "DE222222220",
+                            "FR11223344556",
+                            "IT55667788990"
                         ]
                     },
                     "invalid_vat_uids": {
@@ -2698,7 +2985,7 @@
                     "notes": {
                         "description": "Additional guidance for consumers using the sandbox test UIDs.",
                         "type": "string",
-                        "example": "Use these VAT numbers when calling /v1/vat/validate or /v1/vat/validate-multiple in sandbox or development environments to receive deterministic mock responses."
+                        "example": "Use these VAT numbers when calling /v1/vat/validate or /v1/vat/validate-multiple in sandbox or development environments to receive deterministic mock responses. Address fallback simulator examples: ATU44000001 returns Fallback Line One Trading GmbH, Testgasse 11, 1020 Wien, AT; send company_name=John Doe plus addressLine1=Fallback Line One Trading GmbH and the sandbox will force a zero primary company_name score and a winning addressLine1 fallback, so requested_company_name becomes Fallback Line One Trading GmbH and score_source=addressLine1Fallback. DE440000002 returns Fallback Line Two Systems GmbH, Musterstrasse 22, 20095 Hamburg, DE; send company_name=John Doe plus addressLine2=Fallback Line Two Systems GmbH and the sandbox will force addressLine2Fallback to win. FR44000000003 returns Primary Keeps Adresse SAS, 45 Avenue des Tests, 69002 Lyon, FR; send company_name=John Doe plus addressLine1=45 Avenue des Tests to observe fallback attempted with two score_attempts but score_source remaining companyName. IT44000000004 returns No Fallback Support SRL, Via Prova 9, 40121 Bologna, IT; send company_name=John Doe without helpful address lines to observe score_source=companyName and a single score_attempt. Extra deterministic score examples: ATU00000000(score=0, official provider valid), DE222222220(score=20), FR11223344556(score=60), IT55667788990(score=80)."
                     }
                 },
                 "type": "object"
@@ -2853,6 +3140,33 @@
                         ],
                         "nullable": true
                     },
+                    "valid_providers": {
+                        "description": "Providers that explicitly reported the VAT as valid in this history snapshot.",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "example": [
+                            "fon"
+                        ],
+                        "nullable": true
+                    },
+                    "invalid_providers": {
+                        "description": "Providers that explicitly reported the VAT as invalid in this history snapshot.",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "example": [
+                            "vies"
+                        ],
+                        "nullable": true
+                    },
+                    "provider_audit": {
+                        "description": "Immutable per-provider audit snapshot captured for this history entry.",
+                        "type": "object",
+                        "nullable": true
+                    },
                     "requested_company_name": {
                         "description": "Effective company-name candidate used for scoring. If addressLine1 fallback was selected, this equals addressLine1.",
                         "type": "string",
@@ -2998,6 +3312,25 @@
                         "type": "string",
                         "format": "date-time",
                         "example": "2024-01-19T12:40:00Z",
+                        "nullable": true
+                    },
+                    "has_api_error": {
+                        "description": "True when at least one provider encountered a technical/API failure during the latest validation run.",
+                        "type": "boolean",
+                        "example": true,
+                        "nullable": true
+                    },
+                    "error_message": {
+                        "description": "Primary technical error message captured for the latest validation run when available.",
+                        "type": "string",
+                        "example": "VIES service unavailable.",
+                        "nullable": true
+                    },
+                    "next_api_recheck_at": {
+                        "description": "Scheduled retry time when the latest validation result was preserved because official providers returned only API errors.",
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2026-04-24T14:00:00Z",
                         "nullable": true
                     },
                     "provider_document": {
@@ -3195,8 +3528,16 @@
             "description": "Authentication"
         },
         {
+            "name": "Partners",
+            "description": "Partners"
+        },
+        {
             "name": "Reports",
             "description": "Reports"
+        },
+        {
+            "name": "Tenant",
+            "description": "Tenant"
         }
     ],
     "security": [

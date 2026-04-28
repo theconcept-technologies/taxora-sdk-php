@@ -33,7 +33,35 @@ final class CompanyEndpoint
         $this->refreshCallback = Closure::fromCallable($refreshCallback);
     }
 
-    /** Returns your company context (raw array) */
+    /**
+     * Returns your company context (raw array).
+     *
+     * @return array{
+     *     id?: int|string|null,
+     *     uuid?: string|null,
+     *     name?: string|null,
+     *     vat_uid?: string|null,
+     *     address_line_1?: string|null,
+     *     address_line_2?: string|null,
+     *     street?: string|null,
+     *     zip_code?: string|null,
+     *     city?: string|null,
+     *     country_code?: string|null,
+     *     email?: string|null,
+     *     phone_number?: string|null,
+     *     rate_limit?: int|null,
+     *     api_rate_limit?: int|null,
+     *     vat_rate_limit?: int|null,
+     *     state?: string|null,
+     *     source?: string|null,
+     *     company?: string|null,
+     *     ...<array-key, mixed>
+     * }
+     *
+     * Legacy compatibility:
+     * - `rate_limit` may still be present temporarily but is deprecated in favor of
+     *   `api_rate_limit` and `vat_rate_limit`.
+     */
     public function get(): array
     {
         $uri = sprintf('%s/%s/company', $this->baseUrl, $this->apiVersion->value);

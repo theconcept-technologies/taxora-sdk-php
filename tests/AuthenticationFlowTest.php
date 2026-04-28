@@ -34,6 +34,8 @@ final class AuthenticationFlowTest extends TestCase
             ], JSON_UNESCAPED_SLASHES)),
             new Response(200, ['Content-Type' => 'application/json'], json_encode([
                 'company' => 'Taxora GmbH',
+                'api_rate_limit' => 240,
+                'vat_rate_limit' => 60,
             ], JSON_UNESCAPED_SLASHES)),
         ];
 
@@ -52,7 +54,11 @@ final class AuthenticationFlowTest extends TestCase
 
         $result = $client->company()->get();
 
-        self::assertSame(['company' => 'Taxora GmbH'], $result);
+        self::assertSame([
+            'company' => 'Taxora GmbH',
+            'api_rate_limit' => 240,
+            'vat_rate_limit' => 60,
+        ], $result);
         self::assertCount(2, $http->requests, 'Expected refresh call followed by company request');
 
         $refreshRequest = $http->requests[0];
@@ -78,6 +84,7 @@ final class AuthenticationFlowTest extends TestCase
             ], JSON_UNESCAPED_SLASHES)),
             new Response(200, ['Content-Type' => 'application/json'], json_encode([
                 'company' => 'Taxora GmbH',
+                'rate_limit' => 100,
             ], JSON_UNESCAPED_SLASHES)),
         ];
 
@@ -96,7 +103,10 @@ final class AuthenticationFlowTest extends TestCase
 
         $result = $client->company()->get();
 
-        self::assertSame(['company' => 'Taxora GmbH'], $result);
+        self::assertSame([
+            'company' => 'Taxora GmbH',
+            'rate_limit' => 100,
+        ], $result);
         self::assertCount(3, $http->requests, 'Expected original request, refresh call, then retry');
 
         $firstRequest = $http->requests[0];

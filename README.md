@@ -62,6 +62,9 @@ $vat = $client->vat()->validate('ATU12345678', 'Example GmbH');
 echo $vat->state->value;        // valid / invalid
 echo $vat->company_name; // Official company name
 echo $vat->score;        // Overall confidence score (float)
+var_dump($vat->has_api_error); // true when the official provider had a technical failure
+echo $vat->error_message; // technical provider error details, if returned
+echo $vat->next_api_recheck_at; // planned retry timestamp, if returned
 
 foreach ($vat->breakdown ?? [] as $step) {
     echo $step->stepName.' gave '.$step->scoreContribution.PHP_EOL;
@@ -79,6 +82,8 @@ $vatWithAddress = $client->vat()->validate('ATU12345678', 'John Doe', 'vies', $a
 
 // 3️⃣ Access company info
 $company = $client->company()->get();
+echo $company['api_rate_limit'] ?? 'n/a';
+echo $company['vat_rate_limit'] ?? 'n/a';
 
 // 4️⃣ Export certificates (returns a VatCertificateExport object)
 $export = $client->vat()->certificatesBulkExport('2024-01-01', '2024-12-31');
@@ -86,7 +91,9 @@ $pdfZip = $client->vat()->downloadBulkExport($export->exportId);
 file_put_contents('certificates.zip', $pdfZip);
 ```
 
-`vat()->validate()` returns a `VatResource` object that includes the canonical VAT number, status, requested company name echo, and optional scoring data. The `score` reflects the overall confidence (higher is better), while `breakdown` provides an array of `ScoreBreakdown` objects describing every validation step, its score contribution, and any metadata (e.g. matched addresses or mismatched fields).
+`company()->get()` returns the raw company payload. New company limit fields are exposed as `api_rate_limit` and `vat_rate_limit`. The legacy `rate_limit` field may still appear temporarily for backward compatibility, but it should be treated as deprecated.
+
+`vat()->validate()` returns a `VatResource` object that includes the canonical VAT number, status, requested company name echo, optional scoring data, and optional API error metadata. `state` remains backward-compatible and still carries the canonical business result, while `has_api_error`, `error_message`, and `next_api_recheck_at` expose technical provider failures without breaking existing integrations. The `score` reflects the overall confidence (higher is better), while `breakdown` provides an array of `ScoreBreakdown` objects describing every validation step, its score contribution, and any metadata (e.g. matched addresses or mismatched fields).
 
 Need to plug in your own PSR-18 client or PSR-17 factories (e.g. to add logging or retries)?
 Call the constructor directly or pass them as optional overrides to the factory:
@@ -140,6 +147,12 @@ Example:
 ```php
 $dto = $client->vat()->validate('ATU12345678');
 print_r($dto->toArray());
+
+$retryCase = $client->vat()->validate('ATU44000001', 'Example GmbH');
+if ($retryCase->state === \Taxora\Sdk\Enums\VatState::INVALID && $retryCase->has_api_error) {
+    echo $retryCase->error_message.PHP_EOL;
+    echo $retryCase->next_api_recheck_at.PHP_EOL;
+}
 ```
 
 ---

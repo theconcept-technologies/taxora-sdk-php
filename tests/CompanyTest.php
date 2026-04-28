@@ -19,6 +19,8 @@ final class CompanyTest extends TestCase
         $payload = [
             'name' => 'Taxora GmbH',
             'id' => 'company-1',
+            'api_rate_limit' => 240,
+            'vat_rate_limit' => 60,
         ];
 
         $responses = [new Response(200, ['Content-Type' => 'application/json'], json_encode($payload, JSON_UNESCAPED_SLASHES))];
@@ -48,6 +50,34 @@ final class CompanyTest extends TestCase
         self::assertSame('https://sandbox.taxora.io/v1/company', (string) $request->getUri());
         self::assertSame(['api-key'], $request->getHeader('x-api-key'));
         self::assertSame(['Bearer token-abc'], $request->getHeader('Authorization'));
+    }
+
+    public function testGetPreservesLegacyRateLimitField(): void
+    {
+        $payload = [
+            'name' => 'Taxora GmbH',
+            'id' => 'company-1',
+            'rate_limit' => 100,
+        ];
+
+        $responses = [new Response(200, ['Content-Type' => 'application/json'], json_encode($payload, JSON_UNESCAPED_SLASHES))];
+        $client = new ArrayHttpClient($responses);
+        $requestFactory = new RequestFactory();
+        $store = new InMemoryTokenStorage();
+        $store->set(new Token('token-abc', 'Bearer', new \DateTimeImmutable('+10 minutes')));
+
+        $endpoint = new CompanyEndpoint(
+            $client,
+            $requestFactory,
+            new ApiKeyMiddleware('api-key'),
+            new AuthMiddleware($store),
+            $store,
+            static function (): void {
+            },
+            'https://sandbox.taxora.io'
+        );
+
+        self::assertSame($payload, $endpoint->get());
     }
 
     public function testGetThrowsHttpExceptionOnError(): void

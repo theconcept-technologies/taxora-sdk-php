@@ -39,6 +39,9 @@ final readonly class VatResource
         public ?string $provider_vat_state = null,
         public ?string $provider_note = null,
         public ?\DateTimeImmutable $provider_last_checked_at = null,
+        public ?bool $has_api_error = null,
+        public ?string $error_message = null,
+        public ?string $next_api_recheck_at = null,
         public ?ProviderDocument $provider_document = null,
     ) {
     }
@@ -71,6 +74,9 @@ final readonly class VatResource
             provider_vat_state: isset($data['provider_vat_state']) && is_string($data['provider_vat_state']) ? $data['provider_vat_state'] : null,
             provider_note: isset($data['provider_note']) && is_string($data['provider_note']) ? $data['provider_note'] : null,
             provider_last_checked_at: isset($data['provider_last_checked_at']) ? new \DateTimeImmutable($data['provider_last_checked_at']) : null,
+            has_api_error: array_key_exists('has_api_error', $data) && $data['has_api_error'] !== null ? (bool) $data['has_api_error'] : null,
+            error_message: isset($data['error_message']) && is_string($data['error_message']) ? $data['error_message'] : null,
+            next_api_recheck_at: isset($data['next_api_recheck_at']) && is_string($data['next_api_recheck_at']) ? $data['next_api_recheck_at'] : null,
             provider_document: ProviderDocument::fromArray($data['provider_document'] ?? null),
         );
     }
@@ -121,6 +127,9 @@ final readonly class VatResource
             'provider_vat_state'      => $this->provider_vat_state,
             'provider_note'           => $this->provider_note,
             'provider_last_checked_at' => $this->provider_last_checked_at?->format(DATE_ATOM),
+            'has_api_error'           => $this->has_api_error,
+            'error_message'           => $this->error_message,
+            'next_api_recheck_at'     => $this->next_api_recheck_at,
             'provider_document'       => $this->provider_document?->toArray(),
         ];
     }
