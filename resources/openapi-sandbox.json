@@ -1523,7 +1523,7 @@
                                         "nullable": true
                                     },
                                     "provider": {
-                                        "description": "The VAT provider to use for validation. Possible values: 'fon' (Fon), 'vies' (Vies), 'uk_hmrc' (UK HMRC), 'ai_search' (AI Search), 'fon_vies_ai_search' (Fon + Vies + AI Search), 'uk_hmrc_ai_search' (UK HMRC + AI Search), 'fon_ai_search' (Fon + AI Search), 'fon_vies' (Fon + Vies), 'vies_ai_search' (Vies + AI Search). Default is null.",
+                                        "description": "The VAT provider to use for validation. Possible values: 'fon' (Fon), 'vies' (Vies), 'france_vat' (France VAT), 'anaf' (ANAF), 'uk_hmrc' (UK HMRC), 'ai_search' (AI Search), 'fon_vies_ai_search' (Fon + Vies + AI Search), 'uk_hmrc_ai_search' (UK HMRC + AI Search), 'fon_ai_search' (Fon + AI Search), 'fon_vies' (Fon + Vies), 'vies_ai_search' (Vies + AI Search). Default is null.",
                                         "type": "string",
                                         "example": "vies"
                                     }
@@ -1650,7 +1650,7 @@
                                         }
                                     },
                                     "provider": {
-                                        "description": "The VAT provider to use for validation. Possible values: 'fon' (Fon), 'vies' (Vies), 'uk_hmrc' (UK HMRC), 'ai_search' (AI Search), 'fon_vies_ai_search' (Fon + Vies + AI Search), 'uk_hmrc_ai_search' (UK HMRC + AI Search), 'fon_ai_search' (Fon + AI Search), 'fon_vies' (Fon + Vies), 'vies_ai_search' (Vies + AI Search). Default is null.",
+                                        "description": "The VAT provider to use for validation. Possible values: 'fon' (Fon), 'vies' (Vies), 'france_vat' (France VAT), 'anaf' (ANAF), 'uk_hmrc' (UK HMRC), 'ai_search' (AI Search), 'fon_vies_ai_search' (Fon + Vies + AI Search), 'uk_hmrc_ai_search' (UK HMRC + AI Search), 'fon_ai_search' (Fon + AI Search), 'fon_vies' (Fon + Vies), 'vies_ai_search' (Vies + AI Search). Default is null.",
                                         "type": "string",
                                         "example": "vies"
                                     }
@@ -2889,17 +2889,32 @@
                         "nullable": true
                     },
                     "rate_limit": {
+                        "description": "Legacy alias for vat_rate_limit. Deprecated; use api_rate_limit and vat_rate_limit instead.",
                         "type": "integer",
-                        "deprecated": true,
-                        "example": 100
+                        "example": 100,
+                        "deprecated": true
                     },
                     "api_rate_limit": {
+                        "description": "Configured monthly API request limit for the company.",
                         "type": "integer",
                         "example": 100
                     },
                     "vat_rate_limit": {
+                        "description": "Configured monthly VAT validation limit for the company.",
                         "type": "integer",
                         "example": 100
+                    },
+                    "billing_provider": {
+                        "description": "Internal billing entitlement provider for the company.",
+                        "type": "string",
+                        "example": "manual",
+                        "nullable": true
+                    },
+                    "billing_status": {
+                        "description": "Internal billing entitlement status for the company.",
+                        "type": "string",
+                        "example": "active",
+                        "nullable": true
                     },
                     "state": {
                         "type": "string",
@@ -3293,6 +3308,12 @@
                             },
                             "type": "object"
                         },
+                        "nullable": true
+                    },
+                    "provider_valid": {
+                        "description": "Official provider verdict for this response when available: true for valid, false for invalid, null when no official provider verdict could be determined.",
+                        "type": "boolean",
+                        "example": true,
                         "nullable": true
                     },
                     "provider_vat_state": {

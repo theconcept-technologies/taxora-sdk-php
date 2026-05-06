@@ -36,6 +36,7 @@ final readonly class VatResource
         public ?string $provider = null,
         /** @var string[]|null */
         public ?array $used_providers = null,
+        public ?bool $provider_valid = null,
         public ?string $provider_vat_state = null,
         public ?string $provider_note = null,
         public ?\DateTimeImmutable $provider_last_checked_at = null,
@@ -71,6 +72,7 @@ final readonly class VatResource
             environment: isset($data['environment']) && is_string($data['environment']) ? $data['environment'] : null,
             provider: isset($data['provider']) && is_string($data['provider']) ? $data['provider'] : null,
             used_providers: self::sanitizeStringArray($data['used_providers'] ?? null),
+            provider_valid: array_key_exists('provider_valid', $data) && $data['provider_valid'] !== null ? (bool) $data['provider_valid'] : null,
             provider_vat_state: isset($data['provider_vat_state']) && is_string($data['provider_vat_state']) ? $data['provider_vat_state'] : null,
             provider_note: isset($data['provider_note']) && is_string($data['provider_note']) ? $data['provider_note'] : null,
             provider_last_checked_at: isset($data['provider_last_checked_at']) ? new \DateTimeImmutable($data['provider_last_checked_at']) : null,
@@ -124,6 +126,7 @@ final readonly class VatResource
             'environment'             => $this->environment,
             'provider'                => $this->provider,
             'used_providers'          => $this->used_providers,
+            'provider_valid'          => $this->provider_valid,
             'provider_vat_state'      => $this->provider_vat_state,
             'provider_note'           => $this->provider_note,
             'provider_last_checked_at' => $this->provider_last_checked_at?->format(DATE_ATOM),
@@ -289,5 +292,27 @@ final readonly class VatResource
         $envSegment = $envRaw === 'SANDBOX' ? 'SANDBOX' : 'LIVE';
 
         return sprintf('https://app.taxora.io/vat-history/%s/%s', $envSegment, $this->uuid);
+    }
+
+    public function isProviderValid(): bool
+    {
+        if ($this->provider_valid !== null) {
+            return $this->provider_valid;
+        }
+
+        return strtoupper((string) $this->provider_vat_state) === 'VALID';
+    }
+
+    public function isValid(bool $allowProviderOverride = false): bool
+    {
+        if ($this->state === VatState::VALID) {
+            return true;
+        }
+
+        if (!$allowProviderOverride) {
+            return false;
+        }
+
+        return $this->isProviderValid();
     }
 }

@@ -44,6 +44,7 @@ final class VatTest extends TestCase
             'environment' => 'LIVE',
             'provider' => 'vies',
             'used_providers' => ['fon', 'vies'],
+            'provider_valid' => true,
             'provider_vat_state' => 'VALID',
             'provider_note' => 'Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).',
             'provider_last_checked_at' => '2024-01-19T13:15:00Z',
@@ -77,6 +78,7 @@ final class VatTest extends TestCase
         self::assertSame('LIVE', $vo->environment);
         self::assertSame('vies', $vo->provider);
         self::assertSame(['fon', 'vies'], $vo->used_providers);
+        self::assertTrue($vo->provider_valid);
         self::assertSame('VALID', $vo->provider_vat_state);
         self::assertSame(
             'Provider reports VAT Number is valid, but the check failed (e.g., name/address mismatch).',
@@ -182,6 +184,7 @@ final class VatTest extends TestCase
             'environment' => 'SANDBOX',
             'provider' => 'fon',
             'used_providers' => '["fon", "vies", ""]',
+            'provider_valid' => false,
             'provider_vat_state' => 'INVALID',
             'provider_note' => 'Upstream could not confirm VAT.',
             'has_api_error' => true,
@@ -193,6 +196,7 @@ final class VatTest extends TestCase
 
         self::assertSame('fon', $payload['provider']);
         self::assertSame(['fon', 'vies'], $payload['used_providers']);
+        self::assertFalse($payload['provider_valid']);
         self::assertSame('INVALID', $payload['provider_vat_state']);
         self::assertSame('Upstream could not confirm VAT.', $payload['provider_note']);
         self::assertSame('2024-01-11T09:30:00+00:00', $payload['provider_last_checked_at']);
@@ -213,6 +217,112 @@ final class VatTest extends TestCase
         self::assertNull($vo->has_api_error);
         self::assertNull($vo->error_message);
         self::assertNull($vo->next_api_recheck_at);
+    }
+
+    public function testVatResourceLeavesMissingProviderValidNullable(): void
+    {
+        $missingField = VatResource::fromArray([
+            'vat_uid' => 'ATU00000000',
+            'state' => VatState::INVALID->value,
+            'provider_vat_state' => 'VALID',
+        ]);
+
+        $nullField = VatResource::fromArray([
+            'vat_uid' => 'ATU00000001',
+            'state' => VatState::INVALID->value,
+            'provider_valid' => null,
+            'provider_vat_state' => 'INVALID',
+        ]);
+
+        self::assertNull($missingField->provider_valid);
+        self::assertNull($nullField->provider_valid);
+    }
+
+    public function testIsProviderValidUsesExplicitProviderValidTrue(): void
+    {
+        $vo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345678',
+            'provider_valid' => true,
+            'provider_vat_state' => 'INVALID',
+        ]);
+
+        self::assertTrue($vo->isProviderValid());
+    }
+
+    public function testIsProviderValidUsesExplicitProviderValidFalse(): void
+    {
+        $vo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345678',
+            'provider_valid' => false,
+            'provider_vat_state' => 'VALID',
+        ]);
+
+        self::assertFalse($vo->isProviderValid());
+    }
+
+    public function testIsProviderValidFallsBackToProviderVatState(): void
+    {
+        $validVo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345678',
+            'provider_vat_state' => 'valid',
+        ]);
+
+        $invalidVo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345679',
+            'provider_vat_state' => 'INVALID',
+        ]);
+
+        $missingVo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345680',
+        ]);
+
+        self::assertTrue($validVo->isProviderValid());
+        self::assertFalse($invalidVo->isProviderValid());
+        self::assertFalse($missingVo->isProviderValid());
+    }
+
+    public function testIsValidUsesResourceStateByDefault(): void
+    {
+        $validVo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345678',
+            'state' => VatState::VALID->value,
+            'provider_valid' => false,
+        ]);
+
+        $invalidVo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345679',
+            'state' => VatState::INVALID->value,
+            'provider_valid' => true,
+        ]);
+
+        self::assertTrue($validVo->isValid());
+        self::assertFalse($invalidVo->isValid());
+    }
+
+    public function testIsValidCanUseProviderOverride(): void
+    {
+        $providerPromotesVo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345678',
+            'state' => VatState::INVALID->value,
+            'provider_valid' => true,
+        ]);
+
+        $stateStillWinsVo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345679',
+            'state' => VatState::VALID->value,
+            'provider_valid' => false,
+        ]);
+
+        $fallbackVo = VatResource::fromArray([
+            'vat_uid' => 'ATU12345680',
+            'state' => VatState::INVALID->value,
+            'provider_valid' => null,
+            'provider_vat_state' => 'VALID',
+        ]);
+
+        self::assertTrue($providerPromotesVo->isValid(true));
+        self::assertTrue($stateStillWinsVo->isValid(true));
+        self::assertTrue($fallbackVo->isValid(true));
     }
 
     public function testVatResourceMapsAddressFallbackResponseFields(): void
