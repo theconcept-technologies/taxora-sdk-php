@@ -10,11 +10,14 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Taxora\Sdk\Endpoints\AuthEndpoint;
 use Taxora\Sdk\Endpoints\CompanyEndpoint;
+use Taxora\Sdk\Endpoints\EReportingEndpoint;
+use Taxora\Sdk\Endpoints\SmartEnrichmentEndpoint;
 use Taxora\Sdk\Endpoints\VatEndpoint;
 use Taxora\Sdk\Enums\ApiVersion;
 use Taxora\Sdk\Enums\LoginIdentifier;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
+use Taxora\Sdk\Http\SdkVersionClient;
 use Taxora\Sdk\Http\TokenStorageInterface;
 use Taxora\Sdk\Http\InMemoryTokenStorage;
 use Taxora\Sdk\Exceptions\HttpException;
@@ -24,6 +27,7 @@ use Taxora\Sdk\Enums\Environment;
 
 final class TaxoraClient
 {
+    private readonly Psr18Client $http;
     private string $baseUrl;
     private ApiVersion $apiVersion;
     private ApiKeyMiddleware $apiKeyMw;
@@ -32,9 +36,11 @@ final class TaxoraClient
     private ?AuthEndpoint $authEndpoint = null;
     private ?VatEndpoint $vatEndpoint = null;
     private ?CompanyEndpoint $companyEndpoint = null;
+    private ?SmartEnrichmentEndpoint $smartEnrichmentEndpoint = null;
+    private ?EReportingEndpoint $eReportingEndpoint = null;
 
     public function __construct(
-        private readonly Psr18Client $http,
+        Psr18Client $http,
         private readonly RequestFactoryInterface $requestFactory,
         private readonly StreamFactoryInterface $streamFactory,
         string $apiKey,
@@ -42,6 +48,9 @@ final class TaxoraClient
         Environment $environment = Environment::SANDBOX,
         ApiVersion $apiVersion = ApiVersion::V1
     ) {
+        // Wrap the transport so every request carries the SDK version header.
+        $this->http = new SdkVersionClient($http);
+
         $this->baseUrl = $environment === Environment::PRODUCTION
             ? 'https://api.taxora.io'
             : 'https://sandbox.taxora.io';
@@ -92,6 +101,26 @@ final class TaxoraClient
         return $this->vatEndpoint;
     }
 
+    /** -------- Smart Enrichment (reverse VAT lookup) -------- */
+    public function smartEnrichment(): SmartEnrichmentEndpoint
+    {
+        if ($this->smartEnrichmentEndpoint === null) {
+            $this->smartEnrichmentEndpoint = new SmartEnrichmentEndpoint(
+                $this->http,
+                $this->requestFactory,
+                $this->streamFactory,
+                $this->apiKeyMw,
+                $this->authMw,
+                $this->tokenStore,
+                [$this, 'refresh'],
+                $this->baseUrl,
+                $this->apiVersion
+            );
+        }
+
+        return $this->smartEnrichmentEndpoint;
+    }
+
     /** -------- COMPANY -------- */
     public function company(): CompanyEndpoint
     {
@@ -109,6 +138,26 @@ final class TaxoraClient
         }
 
         return $this->companyEndpoint;
+    }
+
+    /** -------- E-REPORTING (DGFiP Flux 10) -------- */
+    public function eReporting(): EReportingEndpoint
+    {
+        if ($this->eReportingEndpoint === null) {
+            $this->eReportingEndpoint = new EReportingEndpoint(
+                $this->http,
+                $this->requestFactory,
+                $this->streamFactory,
+                $this->apiKeyMw,
+                $this->authMw,
+                $this->tokenStore,
+                [$this, 'refresh'],
+                $this->baseUrl,
+                $this->apiVersion
+            );
+        }
+
+        return $this->eReportingEndpoint;
     }
 
     public function auth(): AuthEndpoint

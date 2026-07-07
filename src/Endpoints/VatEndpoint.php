@@ -229,7 +229,7 @@ final class VatEndpoint
         $body = (string) $response->getBody();
 
         if ($code === 422) {
-            throw new ValidationException($body, code: 422);
+            throw ValidationException::fromResponseBody($body);
         }
         if ($code !== 200 && $code !== 202) {
             throw new HttpException($body, $code, $body);

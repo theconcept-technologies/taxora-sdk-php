@@ -91,6 +91,270 @@ $pdfZip = $client->vat()->downloadBulkExport($export->exportId);
 file_put_contents('certificates.zip', $pdfZip);
 ```
 
+### 🔎 Smart Enrichment (reverse VAT lookup)
+
+Resolve a company **name + address + country → VAT number + confidence**. A confident match
+returns synchronously; harder cases (and all bulk batches) are processed asynchronously and
+delivered via the `enrichment.completed` webhook — poll with `get($jobId)` in the meantime.
+Requires the Smart Enrichment add-on to be active on your account.
+
+```php
+// Single lookup
+$job = $client->smartEnrichment()->lookup(
+    'Example Company GmbH',
+    'AT',
+    street: 'Main Street 10',
+    postalCode: '1010',
+    city: 'Vienna',
+);
+
+if ($job->isProcessing()) {
+    // Resolved asynchronously — poll (or wait for the webhook)
+    $job = $client->smartEnrichment()->get($job->jobId);
+}
+
+$result = $job->result();
+echo $result?->status->value;   // found | no_vat_exists | not_found
+echo $result?->vatNumber;       // e.g. ATU12345678
+echo $result?->confidence;      // 0–100
+
+// Bulk lookup (always async → webhook + polling)
+$bulk = $client->smartEnrichment()->bulkLookup([
+    ['companyName' => 'A GmbH', 'country' => 'DE', 'city' => 'Berlin'],
+    ['companyName' => 'B SARL', 'country' => 'FR'],
+]);
+$done = $client->smartEnrichment()->get($bulk->jobId);
+foreach ($done->results as $r) {
+    echo $r->status->value . ': ' . ($r->vatNumber ?? '—') . PHP_EOL;
+}
+
+// Or block until the job is done (polls get() every 2s, up to 120s by default;
+// throws Taxora\Sdk\Exceptions\TimeoutException when the wait runs out — the job
+// keeps running server-side and can still be polled afterwards)
+$done = $client->smartEnrichment()->waitUntilComplete(
+    $bulk->jobId,
+    timeoutSeconds: 120.0,
+    pollIntervalSeconds: 2.0,
+);
+
+// Lookup history (paginated, newest first; optional free-text search over the
+// queried company name and the resolved VAT number / matched name; perPage is
+// capped at 100 server-side)
+$history = $client->smartEnrichment()->history(page: 1, perPage: 25, search: 'Example');
+echo $history->total . ' lookups' . PHP_EOL;
+echo ($history->stats?->found ?? 0) . ' of ' . ($history->stats?->total ?? 0) . ' ever matched' . PHP_EOL;
+foreach ($history as $row) {
+    echo $row->queryCompanyName . ' → ' . ($row->result?->vatNumber ?? $row->status->value) . PHP_EOL;
+}
+
+// Quota usage for the current billing period (+ recent monthly billing history)
+$usage = $client->smartEnrichment()->usage();
+echo $usage->used . '/' . $usage->included . ' matches used, ' . $usage->remaining . ' left' . PHP_EOL;
+foreach ($usage->history as $entry) {
+    echo $entry->period . ': ' . $entry->matches . ' matches, ' . $entry->amount . ' EUR (' . $entry->state . ')' . PHP_EOL;
+}
+
+// CSV export of all lookups (bulk-input shape + resolved VAT columns; UTF-8 with BOM).
+// All filters are optional — an empty call exports the whole history.
+$csv = $client->smartEnrichment()->export(
+    dateFrom: '2026-01-01',            // Y-m-d, on the job's creation date
+    dateTo: '2026-06-30',
+    minConfidence: 80.0,               // 0–100
+    status: ['found', 'not_found'],    // found | no_vat_exists | not_found
+    onlyFound: true,                   // only rows that resolved a VAT number
+);
+file_put_contents('smart-enrichment.csv', $csv);
+
+// Aggregated statistics (defaults to the last 12 months, monthly buckets)
+$stats = $client->smartEnrichment()->statistics(
+    dateFrom: '2026-01-01',            // optional (Y-m-d)
+    dateTo: '2026-06-30',              // optional (Y-m-d, >= dateFrom)
+    interval: 'month',                 // 'day' | 'week' | 'month' (default 'month')
+);
+echo $stats->totals->found . '/' . $stats->totals->items . ' matched (' . $stats->totals->foundRate . '%)' . PHP_EOL;
+foreach ($stats->timeSeries as $bucket) {
+    echo $bucket->bucket . ': ' . $bucket->found . '/' . $bucket->items . PHP_EOL; // 2026-06: 8/10
+}
+foreach ($stats->byOutcome as $row) {
+    echo $row['outcome'] . ' → ' . $row['count'] . PHP_EOL;
+}
+```
+
+> Note: `no_vat_exists` means the company was identified but legitimately has **no** VAT/UID
+> number (common for purely-domestic German firms). It is a definitive answer — not a failure —
+> and is not billed.
+
+### 🇫🇷 E-Reporting / Compliance (DGFiP Flux 10)
+
+Full French e-reporting flow: enroll a company with the provider, record (and
+optionally submit) transactions, follow the resulting DGFiP tax reports, and pull
+turnover statistics. All endpoints require an active E-Reporting subscription /
+feature grant — except `requestEReportingAccess()`, which is exactly how you ask
+for one. Provider failures (B2Brouter/DGFiP) surface as `HttpException` with
+status code `502`.
+
+#### 1. Enroll (SIRENE lookup → enrollment)
+
+```php
+// Prefill company data from the French SIRENE registry by SIRET, SIREN or FR VAT
+// number (rate limit: 3 requests/minute).
+$prefill = $client->eReporting()->sireneLookup('12345678900012');
+
+$enrollment = $client->eReporting()->createEnrollment(
+    email: 'tax@acme.fr',                    // notification e-mail (required)
+    nafCode: $prefill->nafCode ?? '47',      // 2-digit NAF division (required)
+    enterpriseSize: $prefill->enterpriseSize ?? 'pme', // micro | pme | eti | ge
+    typeOperation: 'mixed',                  // services | goods | mixed
+    reportingStartDate: '2026-09-01',        // Y-m-d or DateTimeInterface
+    siret: $prefill->siret,                  // 14 chars — at least one of siret/siren
+    siren: $prefill->siren,                  // 9-char fallback when no head office SIRET exists
+    companyName: $prefill->companyName,
+    address: $prefill->address,
+    city: $prefill->city,
+    postalcode: $prefill->postalcode,
+    autoActivate: true,                      // false = create the account only
+);
+
+echo $enrollment->status->value;             // e.g. regime_activated
+echo $enrollment->statusLabel;               // human-readable label from the API
+
+// Later: list / fetch enrollments (paginated, perPage capped at 100)
+$enrollments = $client->eReporting()->listEnrollments(page: 1, perPage: 25);
+$enrollment  = $client->eReporting()->getEnrollment($enrollment->id);
+```
+
+#### 2. Record & submit transactions
+
+```php
+use Taxora\Sdk\Enums\ComplianceTransactionType;
+use Taxora\Sdk\ValueObjects\ComplianceInvoiceLine;
+use Taxora\Sdk\ValueObjects\ComplianceLineTax;
+
+$tx = $client->eReporting()->createTransaction(
+    enrollmentId: $enrollment->id,
+    transactionType: ComplianceTransactionType::B2C_OUTBOUND, // or 'b2c_outbound'
+    invoiceNumber: 'TKT-2026-00001',        // max 50 chars
+    invoiceDate: '2026-06-15',              // Y-m-d or DateTimeInterface
+    subtotal: '100.00',
+    total: '120.00',
+    invoiceLines: [
+        new ComplianceInvoiceLine(
+            description: 'Museum ticket',
+            quantity: 2,
+            price: 50,
+            taxes: [new ComplianceLineTax(name: 'TVA', percent: 20, category: 'S')],
+        ),
+    ],
+    currency: 'EUR',                        // optional, defaults to EUR
+    taxAmount: '20.00',
+    submitNow: false,                       // defer provider submission
+);
+
+// Creation is idempotent: retrying the same invoice (enrollment + type + number +
+// date + counterparty VAT) returns the existing transaction instead of a duplicate.
+
+// Pending transactions can still be edited (PATCH semantics — only what you pass
+// is changed; nullable fields cannot be cleared back to null through the SDK)
+// or deleted; submit (or retry) explicitly when ready. Note: per-invoice
+// submission requires the e-invoicing feature — in pure e-reporting mode
+// transactions are reported automatically via the aggregated daily ledgers
+// and submitTransaction() returns a 422 ValidationException.
+$tx = $client->eReporting()->updateTransaction($tx->id, total: '130.00');
+$tx = $client->eReporting()->submitTransaction($tx->id);
+$client->eReporting()->deleteTransaction($obsoleteId);   // 204, only while pending
+
+// Browse what has been recorded (filters optional, perPage capped at 100)
+$page = $client->eReporting()->listTransactions(
+    dateFrom: '2026-06-01',
+    dateTo: '2026-06-30',
+    state: 'pending',                       // pending | sending | submitted | error
+    transactionType: 'b2c_outbound',
+);
+foreach ($page as $row) {
+    echo $row->invoiceNumber . ': ' . $row->state->value . PHP_EOL;
+}
+```
+
+#### 3. CSV bulk import
+
+```php
+// Semicolon-separated CSV, max 2 MB; rows are grouped into invoices by
+// invoice_number, re-uploads are idempotent. Required columns: invoice_number,
+// invoice_date, transaction_type, subtotal, total, line_description,
+// line_quantity, line_price, tax_name, tax_percent, tax_category.
+$result = $client->eReporting()->importTransactions(
+    $enrollment->id,
+    file_get_contents('transactions.csv'),  // raw CSV content
+    'transactions.csv',
+);
+echo $result->created . ' created, ' . $result->skippedDuplicates . ' duplicates' . PHP_EOL;
+foreach ($result->errors as $error) {
+    echo $error . PHP_EOL;                  // per-row problems, e.g. bad tax category
+}
+```
+
+#### 4. Tax reports (DGFiP ledger outcomes)
+
+```php
+$reports = $client->eReporting()->listTaxReports(state: 'refused'); // new | sent | acknowledged | registered | refused | error
+foreach ($reports as $report) {
+    echo $report->state->value . ' — ' . ($report->refusalReason ?? 'ok') . PHP_EOL;
+}
+
+$report = $client->eReporting()->getTaxReport(5);
+if ($report->state->isFailure()) {
+    echo $report->refusalReason;            // e.g. CDV 301 details
+}
+```
+
+#### 5. Revenue statistics & VAT rates
+
+Read-only turnover aggregation over your e-reporting transactions — totals, a time
+series and breakdowns by transaction type, counterparty country and state. All headline
+figures are expressed in the most frequent currency in the range (`primaryCurrency`);
+when more than one currency is present, `isMultiCurrency` is `true` and `byCurrency`
+lists each one. Monetary values are returned as 4-decimal strings to preserve precision.
+
+```php
+$stats = $client->eReporting()->getRevenueStatistics(
+    dateFrom: '2026-01-01',          // optional — defaults to 12 months ago (server-side)
+    dateTo: new DateTimeImmutable(), // optional — defaults to today
+    interval: 'month',               // 'day' | 'week' | 'month' (default 'month')
+    transactionType: 'b2c_outbound', // optional filter (string or ComplianceTransactionType)
+    state: 'submitted',              // optional filter (string or ComplianceTransactionState)
+);
+
+echo $stats->primaryCurrency;        // e.g. EUR
+echo $stats->totals->total;          // e.g. 120000.0000
+foreach ($stats->timeSeries as $bucket) {
+    echo $bucket->bucket . ': ' . $bucket->total . PHP_EOL; // 2026-01: 10800.0000
+}
+foreach ($stats->byCountry as $row) {
+    echo $row['country'] . ' → ' . $row['total'] . PHP_EOL; // 'unknown' groups NULL partners
+}
+
+// Canonical VAT rates & DGFiP tax categories for a reporting country — the valid
+// `category` values for ComplianceLineTax (an `E` rate needs a VATEX comment).
+$rates = $client->eReporting()->getVatRates('FR');
+foreach ($rates->rates as $rate) {
+    echo $rate->percent . '% (' . $rate->category . ')' . ($rate->requiresVatex ? ' — VATEX required' : '') . PHP_EOL;
+}
+```
+
+#### 6. No access yet?
+
+```php
+// The one compliance endpoint that works WITHOUT the e-reporting feature —
+// it files an activation request with the Taxora team. Identity defaults to
+// the authenticated user; all parameters are optional context.
+$client->eReporting()->requestEReportingAccess(
+    company: 'Acme SARL',
+    phone: '+33 1 23 45 67 89',
+    message: 'We need Flux 10 e-reporting starting September.',
+    language: 'fr',
+);
+```
+
 `company()->get()` returns the raw company payload. New company limit fields are exposed as `api_rate_limit` and `vat_rate_limit`. The legacy `rate_limit` field may still appear temporarily for backward compatibility, but it should be treated as deprecated.
 
 `vat()->validate()` returns a `VatResource` object that includes the canonical VAT number, status, requested company name echo, optional scoring data, and optional API error metadata. `state` remains backward-compatible and still carries the canonical business result, while `has_api_error`, `error_message`, and `next_api_recheck_at` expose technical provider failures without breaking existing integrations. The `score` reflects the overall confidence (higher is better), while `breakdown` provides an array of `ScoreBreakdown` objects describing every validation step, its score contribution, and any metadata (e.g. matched addresses or mismatched fields).

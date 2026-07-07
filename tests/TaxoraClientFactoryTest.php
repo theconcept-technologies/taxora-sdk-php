@@ -12,6 +12,7 @@ use Psr\Http\Message\ResponseInterface;
 use Taxora\Sdk\Enums\ApiVersion;
 use Taxora\Sdk\Enums\Environment;
 use Taxora\Sdk\Http\InMemoryTokenStorage;
+use Taxora\Sdk\Http\SdkVersionClient;
 use Taxora\Sdk\Http\TokenStorageInterface;
 use Taxora\Sdk\TaxoraClientFactory;
 
@@ -53,7 +54,11 @@ final class TaxoraClientFactoryTest extends TestCase
             streamFactory: $streamFactory
         );
 
-        self::assertSame($http, $this->readProperty($client, 'http'));
+        // The transport is wrapped in the SDK-version decorator; the provided
+        // client is the decorator's inner client.
+        $wrapped = $this->readProperty($client, 'http');
+        self::assertInstanceOf(SdkVersionClient::class, $wrapped);
+        self::assertSame($http, $this->readProperty($wrapped, 'inner'));
         self::assertSame($requestFactory, $this->readProperty($client, 'requestFactory'));
         self::assertSame($streamFactory, $this->readProperty($client, 'streamFactory'));
         self::assertSame($tokenStorage, $this->readProperty($client, 'tokenStore'));
