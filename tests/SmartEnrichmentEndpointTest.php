@@ -8,6 +8,7 @@ use Http\Factory\Guzzle\StreamFactory;
 use PHPUnit\Framework\TestCase;
 use Taxora\Sdk\Endpoints\SmartEnrichmentEndpoint;
 use Taxora\Sdk\Enums\ApiVersion;
+use Taxora\Sdk\Enums\SmartEnrichmentMode;
 use Taxora\Sdk\Enums\SmartEnrichmentStatus;
 use Taxora\Sdk\Exceptions\HttpException;
 use Taxora\Sdk\Exceptions\TimeoutException;
@@ -769,6 +770,157 @@ final class SmartEnrichmentEndpointTest extends TestCase
         self::assertCount(2, $http->requests);
         self::assertSame(['Bearer stale-token'], $http->requests[0]->getHeader('Authorization'));
         self::assertSame(['Bearer refreshed-token'], $http->requests[1]->getHeader('Authorization'));
+    }
+
+    // ---------------------------------------------------------------------
+    // Search mode
+    // ---------------------------------------------------------------------
+
+    private function processingResponse(string $jobId = 'job-1'): Response
+    {
+        return new Response(202, ['Content-Type' => 'application/json'], json_encode([
+            'jobId' => $jobId,
+            'status' => 'processing',
+        ]));
+    }
+
+    /** @return array<string,mixed> */
+    private function decodeBody(SequenceHttpClient $http, int $index = 0): array
+    {
+        /** @var array<string,mixed> $decoded */
+        $decoded = json_decode((string) $http->requests[$index]->getBody(), true);
+
+        return $decoded;
+    }
+
+    public function testLookupOmitsModeWhenTheCallerDoesNotPickOne(): void
+    {
+        $http = new SequenceHttpClient([$this->processingResponse()]);
+
+        $this->createEndpoint($http)->lookup('Example GmbH', 'DE');
+
+        // The server default must stay the server's decision — sending an explicit 'default'
+        // would pin the SDK to today's default if that ever changes.
+        self::assertArrayNotHasKey('mode', $this->decodeBody($http));
+    }
+
+    public function testLookupSendsTheRequestedMode(): void
+    {
+        $http = new SequenceHttpClient([$this->processingResponse()]);
+
+        $this->createEndpoint($http)->lookup(
+            'Vodafone D2 GmbH',
+            'DE',
+            postalCode: '40547',
+            mode: SmartEnrichmentMode::COMPLEX,
+        );
+
+        $body = $this->decodeBody($http);
+        self::assertSame('complex', $body['mode']);
+        self::assertSame('40547', $body['postalCode']);
+    }
+
+    public function testLookupAcceptsTheModeAsAString(): void
+    {
+        $http = new SequenceHttpClient([$this->processingResponse()]);
+
+        $this->createEndpoint($http)->lookup('Example GmbH', 'DE', mode: 'COMPLEX');
+
+        self::assertSame('complex', $this->decodeBody($http)['mode']);
+    }
+
+    public function testLookupRejectsAnUnknownModeBeforeCallingTheApi(): void
+    {
+        $http = new SequenceHttpClient([$this->processingResponse()]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('mode must be one of');
+
+        $this->createEndpoint($http)->lookup('Example GmbH', 'DE', mode: 'thorough');
+    }
+
+    public function testBulkLookupSendsABatchLevelMode(): void
+    {
+        $http = new SequenceHttpClient([$this->processingResponse('bulk-1')]);
+
+        $this->createEndpoint($http)->bulkLookup(
+            [
+                ['companyName' => 'A GmbH', 'country' => 'DE'],
+                ['companyName' => 'B GmbH', 'country' => 'AT'],
+            ],
+            SmartEnrichmentMode::COMPLEX,
+        );
+
+        $body = $this->decodeBody($http);
+        self::assertSame('complex', $body['mode']);
+        self::assertCount(2, $body['items']);
+    }
+
+    public function testBulkLookupLetsAPerRowModeRideAlong(): void
+    {
+        $http = new SequenceHttpClient([$this->processingResponse('bulk-2')]);
+
+        $this->createEndpoint($http)->bulkLookup([
+            ['companyName' => 'Cheap GmbH', 'country' => 'DE'],
+            ['companyName' => 'Hard GmbH', 'country' => 'DE', 'mode' => 'complex'],
+        ]);
+
+        $body = $this->decodeBody($http);
+        self::assertArrayNotHasKey('mode', $body);
+        self::assertSame('complex', $body['items'][1]['mode']);
+    }
+
+    public function testResultExposesModeAndCrossCheckDiagnostics(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-verdicts',
+                'status' => 'found',
+                'vatNumber' => 'DE811704788',
+                'confidence' => 92.0,
+                'country' => 'DE',
+                'source' => 'ai_web:consensus',
+                'mode' => 'complex',
+                'providerVerdicts' => [
+                    ['provider' => 'gemini', 'model' => 'gemini-3.1-flash-lite', 'status' => 'not_found', 'vatNumber' => null, 'confidence' => 0, 'grounded' => true, 'sourceUrl' => null],
+                    ['provider' => 'perplexity', 'model' => 'sonar-pro', 'status' => 'found', 'vatNumber' => 'DE811704788', 'confidence' => 92, 'grounded' => true, 'sourceUrl' => 'https://example.test/impressum'],
+                ],
+                'addressQuality' => [
+                    'providedPostalCode' => '40547',
+                    'providedCity' => null,
+                    'postalCodeTrusted' => true,
+                    'derivedPlace' => 'Düsseldorf',
+                    'warnings' => ['city_derived_from_postal_code'],
+                ],
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Vodafone D2 GmbH', 'DE')->result();
+
+        self::assertNotNull($result);
+        self::assertSame(SmartEnrichmentMode::COMPLEX, $result->mode);
+        self::assertCount(2, $result->providerVerdicts);
+        self::assertSame('perplexity', $result->providerVerdicts[1]['provider']);
+        self::assertSame('Düsseldorf', $result->addressQuality['derivedPlace'] ?? null);
+        self::assertSame('complex', $result->toArray()['mode']);
+    }
+
+    public function testResultLeavesModeNullWhenTheApiDoesNotReportOne(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-plain',
+                'status' => 'not_found',
+                'country' => 'DE',
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Example GmbH', 'DE')->result();
+
+        self::assertNotNull($result);
+        self::assertNull($result->mode);
+        self::assertSame([], $result->providerVerdicts);
+        self::assertNull($result->addressQuality);
     }
 
     private function createEndpoint(

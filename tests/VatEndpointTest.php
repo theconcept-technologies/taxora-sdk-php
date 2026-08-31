@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use Http\Factory\Guzzle\RequestFactory;
 use Http\Factory\Guzzle\StreamFactory;
@@ -14,6 +15,8 @@ use Taxora\Sdk\Exceptions\ValidationException;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
 use Taxora\Sdk\Http\InMemoryTokenStorage;
+use Taxora\Sdk\Http\RetryPolicy;
+use Taxora\Sdk\Tests\Fixtures\FakeNetworkException;
 use Taxora\Sdk\Tests\Fixtures\SequenceHttpClient;
 use Taxora\Sdk\ValueObjects\VatCertificateExport;
 use Taxora\Sdk\ValueObjects\VatResource;
@@ -252,7 +255,7 @@ final class VatEndpointTest extends TestCase
         self::assertSame('AT', $payload['countryCode']);
     }
 
-    public function testValidateRetriesOnceOnGatewayTimeoutAndReturnsVatResource(): void
+    public function testValidateRetriesOnGatewayTimeoutAndReturnsVatResource(): void
     {
         $html504 = '<html><body>via _upstream (504 -)</body></html>';
         $http = new SequenceHttpClient([
@@ -275,10 +278,11 @@ final class VatEndpointTest extends TestCase
         self::assertCount(2, $http->requests);
     }
 
-    public function testValidateThrowsCleanMessageAfterSecondGatewayTimeout(): void
+    public function testValidateThrowsCleanMessageAfterExhaustingRetries(): void
     {
         $html504 = '<html><body>via _upstream (504 -)</body></html>';
         $http = new SequenceHttpClient([
+            new Response(504, ['Content-Type' => 'text/html'], $html504),
             new Response(504, ['Content-Type' => 'text/html'], $html504),
             new Response(504, ['Content-Type' => 'text/html'], $html504),
         ]);
@@ -290,9 +294,253 @@ final class VatEndpointTest extends TestCase
             $this->fail('Expected HttpException to be thrown.');
         } catch (HttpException $exception) {
             self::assertSame(504, $exception->getStatusCode());
-            self::assertSame('Taxora VAT validation request timed out (HTTP 504).', $exception->getMessage());
+            self::assertSame(
+                'Taxora VAT validation failed after 3 attempts (HTTP 504 Gateway Timeout).',
+                $exception->getMessage()
+            );
             self::assertSame($html504, $exception->getResponseBody());
+            self::assertCount(3, $http->requests);
+
+            // The gateway error page must not leak into the chained messages
+            // either -- integrators log the whole chain, not just the top one.
+            for ($previous = $exception->getPrevious(); $previous !== null; $previous = $previous->getPrevious()) {
+                self::assertStringNotContainsString('<', $previous->getMessage());
+                self::assertSame('Taxora API request failed (HTTP 504 Gateway Timeout).', $previous->getMessage());
+            }
+        }
+    }
+
+    public function testHtmlErrorPageNeverBecomesTheExceptionMessage(): void
+    {
+        $html = <<<'HTML'
+            <!DOCTYPE html>
+            <html>
+            <head><meta name="robots" content="noindex"></head>
+            <body><p class="code">Error code: 502</p></body>
+            </html>
+            HTML;
+
+        $http = new SequenceHttpClient([
+            new Response(502, ['Content-Type' => 'text/html'], $html),
+        ]);
+
+        $endpoint = $this->createEndpoint($http, RetryPolicy::disabled());
+
+        try {
+            $endpoint->validate('ATU12345678');
+            $this->fail('Expected HttpException to be thrown.');
+        } catch (HttpException $exception) {
+            self::assertSame('Taxora API request failed (HTTP 502 Bad Gateway).', $exception->getMessage());
+            self::assertStringNotContainsString('<', $exception->getMessage());
+            // The raw page stays available for debugging.
+            self::assertSame($html, $exception->getResponseBody());
+        }
+    }
+
+    public function testRateLimitIsRetriedOnlyWhenTheApiSaysHowLongToWait(): void
+    {
+        $slept = [];
+        $policy = new RetryPolicy(sleeper: static function (int $ms) use (&$slept): void {
+            $slept[] = $ms;
+        });
+
+        $http = new SequenceHttpClient([
+            new Response(429, ['Content-Type' => 'application/json', 'Retry-After' => '2'], '{"message":"Too Many Requests"}'),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['vat_uid' => 'ATU12345678', 'state' => 'valid'],
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $result = $this->createEndpoint($http, $policy)->validate('ATU12345678');
+
+        self::assertInstanceOf(VatResource::class, $result);
+        self::assertCount(2, $http->requests);
+        self::assertSame([2000], $slept, 'waits exactly as long as the API asked');
+    }
+
+    public function testRateLimitWithoutRetryAfterFailsImmediately(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(429, ['Content-Type' => 'application/json'], '{"message":"Too Many Requests"}'),
+        ]);
+
+        try {
+            $this->createEndpoint($http)->validate('ATU12345678');
+            $this->fail('Expected HttpException to be thrown.');
+        } catch (HttpException $exception) {
+            self::assertSame(429, $exception->getStatusCode());
+            self::assertSame('Too Many Requests', $exception->getMessage());
+            self::assertCount(1, $http->requests);
+        }
+    }
+
+    public function testRetryAfterLongerThanTheCapFailsImmediately(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(504, ['Content-Type' => 'text/html', 'Retry-After' => '120'], '<html><body>504</body></html>'),
+        ]);
+
+        try {
+            $this->createEndpoint($http)->validate('ATU12345678');
+            $this->fail('Expected HttpException to be thrown.');
+        } catch (HttpException $exception) {
+            self::assertSame('120', $exception->getRetryAfter());
+            self::assertCount(1, $http->requests, 'blocking the caller for two minutes is worse than failing');
+        }
+    }
+
+    public function testTransportFailureIsRetried(): void
+    {
+        $request = new Request('POST', 'https://sandbox.taxora.io/v1/vat/validate');
+        $http = new SequenceHttpClient([
+            new FakeNetworkException($request),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['vat_uid' => 'ATU12345678', 'state' => 'valid'],
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $result = $this->createEndpoint($http)->validate('ATU12345678');
+
+        self::assertInstanceOf(VatResource::class, $result);
+        self::assertCount(2, $http->requests);
+    }
+
+    public function testTransportFailureIsRethrownUnchangedWhenRetriesAreUsedUp(): void
+    {
+        $request = new Request('POST', 'https://sandbox.taxora.io/v1/vat/validate');
+        $http = new SequenceHttpClient([
+            new FakeNetworkException($request),
+            new FakeNetworkException($request),
+            new FakeNetworkException($request),
+        ]);
+
+        try {
+            $this->createEndpoint($http)->validate('ATU12345678');
+            $this->fail('Expected FakeNetworkException to be thrown.');
+        } catch (FakeNetworkException $exception) {
+            // Callers keep seeing their own HTTP client's error type and message.
+            self::assertSame('cURL error 28: Operation timed out', $exception->getMessage());
+            self::assertCount(3, $http->requests);
+        }
+    }
+
+    public function testTransportFailureIsNotRetriedWhenDisabled(): void
+    {
+        $request = new Request('POST', 'https://sandbox.taxora.io/v1/vat/validate');
+        $http = new SequenceHttpClient([
+            new FakeNetworkException($request),
+            new FakeNetworkException($request),
+        ]);
+
+        $endpoint = $this->createEndpoint($http, new RetryPolicy(initialDelayMs: 0, retryOnNetworkErrors: false));
+
+        try {
+            $endpoint->validate('ATU12345678');
+            $this->fail('Expected FakeNetworkException to be thrown.');
+        } catch (FakeNetworkException) {
+            self::assertCount(1, $http->requests);
+        }
+    }
+
+    public function testRetriesCanBeTurnedOffCompletely(): void
+    {
+        // Callers that do their own retrying (queue workers, cron jobs) opt out
+        // with RetryPolicy::disabled() and get the failure on the first attempt.
+        $http = new SequenceHttpClient([
+            new Response(504, ['Content-Type' => 'text/html'], '<html><body>504</body></html>'),
+        ]);
+
+        $endpoint = $this->createEndpoint($http, RetryPolicy::disabled());
+
+        try {
+            $endpoint->validate('ATU12345678');
+            $this->fail('Expected HttpException to be thrown.');
+        } catch (HttpException $exception) {
+            self::assertSame(504, $exception->getStatusCode());
+            self::assertSame('Taxora API request failed (HTTP 504 Gateway Timeout).', $exception->getMessage());
+            self::assertCount(1, $http->requests, 'no second attempt when retrying is disabled');
+        }
+    }
+
+    public function testRetryAttemptsAreConfigurable(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(504, ['Content-Type' => 'text/html'], '<html><body>504</body></html>'),
+            new Response(504, ['Content-Type' => 'text/html'], '<html><body>504</body></html>'),
+        ]);
+
+        $endpoint = $this->createEndpoint($http, RetryPolicy::withoutDelay(maxAttempts: 2));
+
+        try {
+            $endpoint->validate('ATU12345678');
+            $this->fail('Expected HttpException to be thrown.');
+        } catch (HttpException $exception) {
+            self::assertSame(
+                'Taxora VAT validation failed after 2 attempts (HTTP 504 Gateway Timeout).',
+                $exception->getMessage()
+            );
             self::assertCount(2, $http->requests);
+        }
+    }
+
+    public function testValidateRetriesOn502And503AndWaitsBetweenAttempts(): void
+    {
+        $slept = [];
+        $policy = new RetryPolicy(sleeper: static function (int $ms) use (&$slept): void {
+            $slept[] = $ms;
+        });
+
+        $http = new SequenceHttpClient([
+            new Response(502, ['Content-Type' => 'text/html'], '<html><body>bad gateway</body></html>'),
+            new Response(503, ['Content-Type' => 'text/html'], '<html><body>unavailable</body></html>'),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['vat_uid' => 'ATU12345678', 'state' => 'valid'],
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $result = $this->createEndpoint($http, $policy)->validate('ATU12345678');
+
+        self::assertInstanceOf(VatResource::class, $result);
+        self::assertCount(3, $http->requests);
+        self::assertSame([500, 1000], $slept, 'exponential backoff between attempts');
+    }
+
+    public function testStateLookupIsRetried(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(504, ['Content-Type' => 'text/html'], '<html><body>504</body></html>'),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['vat_uid' => 'ATU12345678', 'state' => 'valid'],
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $result = $this->createEndpoint($http)->state('ATU12345678');
+
+        self::assertInstanceOf(VatResource::class, $result);
+        self::assertCount(2, $http->requests);
+    }
+
+    public function testCertificateExportIsNotRetried(): void
+    {
+        // Triggers a server-side job and an e-mail: a gateway timeout does not tell
+        // us whether it already ran, so this must fail fast instead of duplicating it.
+        $http = new SequenceHttpClient([
+            new Response(504, ['Content-Type' => 'text/html'], '<html><body>504</body></html>'),
+        ]);
+
+        $endpoint = $this->createEndpoint($http);
+
+        try {
+            $endpoint->certificatesBulkExport('2024-01-01', '2024-01-31');
+            $this->fail('Expected HttpException to be thrown.');
+        } catch (HttpException $exception) {
+            self::assertSame(504, $exception->getStatusCode());
+            self::assertSame('Taxora API request failed (HTTP 504 Gateway Timeout).', $exception->getMessage());
+            self::assertCount(1, $http->requests);
         }
     }
 
@@ -391,7 +639,7 @@ final class VatEndpointTest extends TestCase
         self::assertCount(0, $http->requests);
     }
 
-    private function createEndpoint(SequenceHttpClient $http): VatEndpoint
+    private function createEndpoint(SequenceHttpClient $http, ?RetryPolicy $retryPolicy = null): VatEndpoint
     {
         $tokenStorage = new InMemoryTokenStorage();
 
@@ -405,7 +653,9 @@ final class VatEndpointTest extends TestCase
             refreshCallback: static function (): void {
             },
             baseUrl: 'https://sandbox.taxora.io',
-            apiVersion: ApiVersion::V1
+            apiVersion: ApiVersion::V1,
+            // No waiting between attempts: the backoff itself is covered in RetryPolicyTest.
+            retryPolicy: $retryPolicy ?? RetryPolicy::withoutDelay()
         );
     }
 }

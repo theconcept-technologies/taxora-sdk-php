@@ -17,6 +17,7 @@ use Taxora\Sdk\Enums\ApiVersion;
 use Taxora\Sdk\Enums\LoginIdentifier;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
+use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\SdkVersionClient;
 use Taxora\Sdk\Http\TokenStorageInterface;
 use Taxora\Sdk\Http\InMemoryTokenStorage;
@@ -33,6 +34,7 @@ final class TaxoraClient
     private ApiKeyMiddleware $apiKeyMw;
     private AuthMiddleware $authMw;
     private TokenStorageInterface $tokenStore;
+    private RetryPolicy $retryPolicy;
     private ?AuthEndpoint $authEndpoint = null;
     private ?VatEndpoint $vatEndpoint = null;
     private ?CompanyEndpoint $companyEndpoint = null;
@@ -46,7 +48,8 @@ final class TaxoraClient
         string $apiKey,
         ?TokenStorageInterface $tokenStorage = null,
         Environment $environment = Environment::SANDBOX,
-        ApiVersion $apiVersion = ApiVersion::V1
+        ApiVersion $apiVersion = ApiVersion::V1,
+        ?RetryPolicy $retryPolicy = null
     ) {
         // Wrap the transport so every request carries the SDK version header.
         $this->http = new SdkVersionClient($http);
@@ -59,6 +62,8 @@ final class TaxoraClient
         $this->tokenStore = $tokenStorage ?? new InMemoryTokenStorage();
         $this->apiKeyMw   = new ApiKeyMiddleware($apiKey);
         $this->authMw     = new AuthMiddleware($this->tokenStore);
+        // Gateway hiccups (502/503/504) are retried on read-only calls; see RetryPolicy.
+        $this->retryPolicy = $retryPolicy ?? new RetryPolicy();
     }
 
     /** -------- AUTH -------- */
@@ -94,7 +99,8 @@ final class TaxoraClient
                 $this->tokenStore,
                 [$this, 'refresh'],
                 $this->baseUrl,
-                $this->apiVersion
+                $this->apiVersion,
+                retryPolicy: $this->retryPolicy
             );
         }
 
@@ -114,7 +120,8 @@ final class TaxoraClient
                 $this->tokenStore,
                 [$this, 'refresh'],
                 $this->baseUrl,
-                $this->apiVersion
+                $this->apiVersion,
+                retryPolicy: $this->retryPolicy
             );
         }
 
@@ -133,7 +140,8 @@ final class TaxoraClient
                 $this->tokenStore,
                 [$this, 'refresh'],
                 $this->baseUrl,
-                $this->apiVersion
+                $this->apiVersion,
+                retryPolicy: $this->retryPolicy
             );
         }
 
@@ -153,7 +161,8 @@ final class TaxoraClient
                 $this->tokenStore,
                 [$this, 'refresh'],
                 $this->baseUrl,
-                $this->apiVersion
+                $this->apiVersion,
+                retryPolicy: $this->retryPolicy
             );
         }
 
@@ -171,7 +180,8 @@ final class TaxoraClient
                 $this->authMw,
                 $this->tokenStore,
                 $this->baseUrl,
-                $this->apiVersion
+                $this->apiVersion,
+                retryPolicy: $this->retryPolicy
             );
         }
 
@@ -212,7 +222,7 @@ final class TaxoraClient
         }
 
         if ($res->getStatusCode() === 422) {
-            throw new ValidationException((string) $res->getBody(), code: 422);
+            throw ValidationException::fromResponseBody((string) $res->getBody());
         }
 
         $this->assertStatus($res, [200, 202]);
@@ -256,7 +266,7 @@ final class TaxoraClient
         try {
             $this->refresh();
         } catch (\Throwable) {
-            throw new AuthenticationException('Unauthorized and refresh failed: ' . (string) $res->getBody(), 401);
+            throw AuthenticationException::refreshFailed((string) $res->getBody());
         }
     }
 
@@ -266,12 +276,12 @@ final class TaxoraClient
             $code = $res->getStatusCode();
             $body = (string) $res->getBody();
             if ($code === 401) {
-                throw new AuthenticationException($body, 401);
+                throw AuthenticationException::fromResponse($body);
             }
             if ($code === 422) {
-                throw new ValidationException($body, code: 422);
+                throw ValidationException::fromResponseBody($body);
             }
-            throw new HttpException("HTTP $code: $body", $code);
+            throw HttpException::fromResponse($code, $body);
         }
     }
 }

@@ -118,10 +118,38 @@ echo $result?->status->value;   // found | no_vat_exists | not_found
 echo $result?->vatNumber;       // e.g. ATU12345678
 echo $result?->confidence;      // 0–100
 
-// Bulk lookup (always async → webhook + polling)
+// Search mode: `default` searches with one AI provider and only consults a second one
+// when the first finds nothing. `complex` has two independent providers search from the
+// start and puts every number either of them proposes through the tax authority's checks.
+// Complex finds companies a single search misses — typically ones whose VAT only appears
+// in a website Impressum — and costs more per lookup, so it is opt-in.
+$job = $client->smartEnrichment()->lookup(
+    'Vodafone D2 GmbH',
+    'DE',
+    postalCode: '40547',
+    mode: SmartEnrichmentMode::COMPLEX,
+);
+
+// When more than one provider searched, you can see what each one concluded on its own.
+// Two of them reporting the same number is the strongest confirmation this layer produces.
+foreach ($job->result()?->providerVerdicts ?? [] as $verdict) {
+    echo $verdict['provider'] . ': ' . ($verdict['vatNumber'] ?? 'nothing') . PHP_EOL;
+}
+
+// The API also grades the address you sent. Worth writing back into your own records:
+// a `postal_code_city_mismatch` / `postal_code_unassigned` warning means the postal code
+// in your source data is wrong, and `derivedPlace` is the area it actually points at.
+$quality = $job->result()?->addressQuality;
+if ($quality !== null && $quality['warnings'] !== []) {
+    echo implode(', ', $quality['warnings']) . ' → ' . ($quality['derivedPlace'] ?? '?') . PHP_EOL;
+}
+
+// Bulk lookup (always async → webhook + polling). The batch-level mode applies to every
+// row; a row carrying its own 'mode' overrides it, so you can pay for `complex` on just
+// the rows that need it.
 $bulk = $client->smartEnrichment()->bulkLookup([
     ['companyName' => 'A GmbH', 'country' => 'DE', 'city' => 'Berlin'],
-    ['companyName' => 'B SARL', 'country' => 'FR'],
+    ['companyName' => 'B SARL', 'country' => 'FR', 'mode' => 'complex'],
 ]);
 $done = $client->smartEnrichment()->get($bulk->jobId);
 foreach ($done->results as $r) {
@@ -494,6 +522,92 @@ Switch easily via the constructor:
 
 ```php
 $client = new TaxoraClient(..., environment: Environment::PRODUCTION);
+```
+
+---
+
+## 🚨 Error Handling
+
+| Exception                 | When                                                                 |
+| ------------------------- | -------------------------------------------------------------------- |
+| `ValidationException`     | HTTP 422 — `getErrors()` holds the per-field messages                 |
+| `AuthenticationException` | HTTP 401 — credentials rejected, or the token refresh failed          |
+| `HttpException`           | Every other non-success status — `getStatusCode()` / `getResponseBody()` |
+| `TimeoutException`        | A client-side wait gave up; the server-side job keeps running          |
+
+**Exception messages are always short and safe to log.** A response body is
+never used as the message: gateways in front of the API answer `502`/`503`/`504`
+with a full HTML error page, and that page would otherwise land in every log
+line and error mail of your application. The SDK uses the `message` / `error`
+field of a JSON error body when there is one, and falls back to the status line
+(`Taxora API request failed (HTTP 504 Gateway Timeout).`) otherwise. The
+untouched body stays available via `HttpException::getResponseBody()`.
+
+```php
+try {
+    $vat = $client->vat()->validate('ATU12345678');
+} catch (ValidationException $e) {
+    // 422 — bad input
+    $errors = $e->getErrors();
+} catch (HttpException $e) {
+    // e.g. "Taxora VAT validation failed after 3 attempts (HTTP 504 Gateway Timeout)."
+    $logger->warning($e->getMessage(), ['status' => $e->getStatusCode()]);
+}
+```
+
+### Automatic retries
+
+The SDK retries what never produced an answer from the API itself: **3 attempts,
+with 500 ms and 1000 ms of backoff in between**. That covers
+
+- **gateway failures (`502`, `503`, `504`)** — the infrastructure in front of the
+  API, where a second attempt a moment later usually succeeds;
+- **connection-level failures** — reset connections, client-side timeouts, DNS
+  hiccups. Once the attempts are used up, the transport exception of your own
+  HTTP client is rethrown unchanged, so nothing about its type or message changes
+  for you;
+- **`429 Too Many Requests`, but only with a `Retry-After`** — then the SDK waits
+  exactly as long as the API asked instead of using its own backoff. Without that
+  header a retry would only hammer a rate limit that is already tripped, so the
+  error is surfaced immediately. A `Retry-After` longer than `maxRetryAfterMs`
+  (10 s by default) also fails immediately rather than blocking your worker — the
+  raw header stays readable via `HttpException::getRetryAfter()`.
+
+Everything else fails on the first attempt, including any `5xx` the API produced
+itself (a `500` is a bug, not a hiccup — repeating it just costs time).
+
+Retries apply to read-only calls only — VAT validation, lookups, state, history,
+search, certificate downloads, company and e-reporting reads, login and token
+refresh. Calls that change state or cost quota (`certificatesBulkExport()`,
+`smartEnrichment()->lookup()`, e-reporting enrollment/transaction writes) are
+**never** retried automatically, because a gateway timeout does not tell us
+whether the API already processed the request.
+
+Once the attempts are used up you get one clean error:
+
+```
+Taxora VAT validation failed after 3 attempts (HTTP 504 Gateway Timeout).
+```
+
+Tune or disable it via `RetryPolicy`:
+
+```php
+use Taxora\Sdk\Http\RetryPolicy;
+
+$client = TaxoraClientFactory::create(
+    apiKey: 'YOUR_X_API_KEY',
+    retryPolicy: new RetryPolicy(
+        maxAttempts: 5,
+        initialDelayMs: 250,
+        retryableStatusCodes: [502, 503, 504],  // add or drop status codes
+        respectRetryAfter: true,                // false = ignore the header entirely
+        maxRetryAfterMs: 10_000,                // longest wait accepted from Retry-After
+        retryOnNetworkErrors: true,             // false = surface transport errors at once
+    ),
+);
+
+// or, for callers that do their own retrying (queue workers, cron jobs):
+$client = TaxoraClientFactory::create(apiKey: '…', retryPolicy: RetryPolicy::disabled());
 ```
 
 ---

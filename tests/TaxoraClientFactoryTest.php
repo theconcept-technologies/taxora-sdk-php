@@ -42,7 +42,7 @@ final class TaxoraClientFactoryTest extends TestCase
 
         $requestFactory = new RequestFactory();
         $streamFactory  = new StreamFactory();
-        $tokenStorage   = $this->createMock(TokenStorageInterface::class);
+        $tokenStorage   = $this->createStub(TokenStorageInterface::class);
 
         $client = TaxoraClientFactory::create(
             apiKey: 'custom-key',
@@ -67,9 +67,8 @@ final class TaxoraClientFactoryTest extends TestCase
 
     private function readProperty(object $object, string $property): mixed
     {
-        $ref = new \ReflectionProperty($object, $property);
-        $ref->setAccessible(true);
-
-        return $ref->getValue($object);
+        // No setAccessible() call: it has had no effect since PHP 8.1 and is
+        // deprecated as of 8.5.
+        return (new \ReflectionProperty($object, $property))->getValue($object);
     }
 }

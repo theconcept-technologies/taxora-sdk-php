@@ -22,6 +22,7 @@ use Taxora\Sdk\Exceptions\HttpException;
 use Taxora\Sdk\Exceptions\ValidationException;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
+use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
 use Taxora\Sdk\ValueObjects\ComplianceEnrollment;
 use Taxora\Sdk\ValueObjects\ComplianceEnrollmentPage;
@@ -51,6 +52,8 @@ use Throwable;
  */
 final class EReportingEndpoint
 {
+    use Concerns\RetriesTransientErrors;
+
     private const INTERVALS = ['day', 'week', 'month'];
     private const ENTERPRISE_SIZES = ['micro', 'pme', 'eti', 'ge'];
     private const TYPE_OPERATIONS = ['services', 'goods', 'mixed'];
@@ -75,8 +78,10 @@ final class EReportingEndpoint
         callable $refreshCallback,
         private readonly string $baseUrl,
         private readonly ApiVersion $apiVersion = ApiVersion::V1,
+        ?RetryPolicy $retryPolicy = null,
     ) {
         $this->refreshCallback = Closure::fromCallable($refreshCallback);
+        $this->retryPolicy = $retryPolicy ?? new RetryPolicy();
     }
 
     // ---------------------------------------------------------------------
@@ -414,7 +419,7 @@ final class EReportingEndpoint
             throw ValidationException::fromResponseBody($body);
         }
         if ($code !== 204 && $code !== 200) {
-            throw new HttpException($body, $code, $body);
+            throw HttpException::fromResponse($code, $body, retryAfter: $this->retryAfterOf($response));
         }
         if ($code === 200 && trim($body) !== '') {
             $this->assertSuccessful($this->decodeJson($body, $code), $code, $body);
@@ -487,7 +492,7 @@ final class EReportingEndpoint
             throw ValidationException::fromResponseBody($body);
         }
         if ($code !== 200 && $code !== 201) {
-            throw new HttpException($body, $code, $body);
+            throw HttpException::fromResponse($code, $body, retryAfter: $this->retryAfterOf($response));
         }
 
         $payload = $this->decodeJson($body, $code);
@@ -739,8 +744,19 @@ final class EReportingEndpoint
         return $pairs === [] ? '' : '?' . implode('&', $pairs);
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * Read-only, so a transient gateway failure is retried (see RetryPolicy).
+     *
+     * @return array<string,mixed>
+     */
     private function jsonGet(string $uri): array
+    {
+        /** @var array<string,mixed> */
+        return $this->withRetries('e-reporting request', fn () => $this->sendJsonGet($uri));
+    }
+
+    /** @return array<string,mixed> */
+    private function sendJsonGet(string $uri): array
     {
         $response = $this->send(fn () => $this->req->createRequest('GET', $uri));
         $code = $response->getStatusCode();
@@ -750,7 +766,7 @@ final class EReportingEndpoint
             throw ValidationException::fromResponseBody($body);
         }
         if ($code !== 200) {
-            throw new HttpException($body, $code, $body);
+            throw HttpException::fromResponse($code, $body, retryAfter: $this->retryAfterOf($response));
         }
 
         $payload = $this->decodeJson($body, $code);
@@ -790,7 +806,7 @@ final class EReportingEndpoint
             throw ValidationException::fromResponseBody($responseBody);
         }
         if (!in_array($code, $okCodes, true)) {
-            throw new HttpException($responseBody, $code, $responseBody);
+            throw HttpException::fromResponse($code, $responseBody, retryAfter: $this->retryAfterOf($response));
         }
 
         $payload = $this->decodeJson($responseBody, $code);
@@ -846,7 +862,7 @@ final class EReportingEndpoint
             }
 
             if ($attempt++ >= 1) {
-                throw new AuthenticationException((string) $response->getBody(), 401);
+                throw AuthenticationException::fromResponse((string) $response->getBody());
             }
 
             $this->refreshTokenOrFail((string) $response->getBody());
@@ -864,13 +880,13 @@ final class EReportingEndpoint
     private function refreshTokenOrFail(string $body): void
     {
         if ($this->tokens->get() === null) {
-            throw new AuthenticationException($body, 401);
+            throw AuthenticationException::fromResponse($body);
         }
 
         try {
             ($this->refreshCallback)();
         } catch (Throwable $exception) {
-            throw new AuthenticationException('Unauthorized and refresh failed: ' . $body, 401, $exception);
+            throw AuthenticationException::refreshFailed($body, $exception);
         }
     }
 

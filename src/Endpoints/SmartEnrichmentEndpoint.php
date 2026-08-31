@@ -11,6 +11,7 @@ use Psr\Http\Message\RequestFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Taxora\Sdk\Enums\ApiVersion;
+use Taxora\Sdk\Enums\SmartEnrichmentMode;
 use Taxora\Sdk\Enums\SmartEnrichmentStatus;
 use Taxora\Sdk\Exceptions\AuthenticationException;
 use Taxora\Sdk\Exceptions\HttpException;
@@ -18,6 +19,7 @@ use Taxora\Sdk\Exceptions\TimeoutException;
 use Taxora\Sdk\Exceptions\ValidationException;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
+use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
 use Taxora\Sdk\ValueObjects\SmartEnrichmentHistoryPage;
 use Taxora\Sdk\ValueObjects\SmartEnrichmentJob;
@@ -34,6 +36,8 @@ use Throwable;
  */
 final class SmartEnrichmentEndpoint
 {
+    use Concerns\RetriesTransientErrors;
+
     private const INTERVALS = ['day', 'week', 'month'];
 
     private readonly Closure $refreshCallback;
@@ -55,9 +59,11 @@ final class SmartEnrichmentEndpoint
         callable $refreshCallback,
         private readonly string $baseUrl,
         private readonly ApiVersion $apiVersion = ApiVersion::V1,
-        ?callable $sleep = null
+        ?callable $sleep = null,
+        ?RetryPolicy $retryPolicy = null
     ) {
         $this->refreshCallback = Closure::fromCallable($refreshCallback);
+        $this->retryPolicy = $retryPolicy ?? new RetryPolicy();
         $this->sleep = $sleep !== null
             ? Closure::fromCallable($sleep)
             : static function (float $seconds): void {
@@ -68,13 +74,18 @@ final class SmartEnrichmentEndpoint
     /**
      * Single reverse lookup. Returns a confident result synchronously, or a `processing`
      * job (poll with get($job->jobId)) when deeper resolution is needed.
+     *
+     * @param SmartEnrichmentMode|string|null $mode Search depth. Null uses the server default
+     *                                              (SmartEnrichmentMode::DEFAULT); COMPLEX searches
+     *                                              with two providers and costs more per lookup.
      */
     public function lookup(
         string $companyName,
         string $country,
         ?string $street = null,
         ?string $postalCode = null,
-        ?string $city = null
+        ?string $city = null,
+        SmartEnrichmentMode|string|null $mode = null
     ): SmartEnrichmentJob {
         $this->assertLookupInput($companyName, $country);
 
@@ -85,6 +96,7 @@ final class SmartEnrichmentEndpoint
             'street' => $street,
             'postalCode' => $postalCode,
             'city' => $city,
+            'mode' => $this->normalizeMode($mode),
         ], static fn ($v) => $v !== null);
 
         $payload = $this->jsonPost($uri, $body);
@@ -96,9 +108,12 @@ final class SmartEnrichmentEndpoint
      * Bulk batch — always async. Returns a `processing` job; results arrive via the
      * `enrichment.completed` webhook and are retrievable via get($job->jobId).
      *
-     * @param list<array<string,mixed>> $items each: companyName, country, [street, postalCode, city]
+     * @param list<array<string,mixed>> $items each: companyName, country, [street, postalCode, city, mode]
+     * @param SmartEnrichmentMode|string|null $mode Search depth for every row in the batch. A row
+     *                                              carrying its own 'mode' overrides it, so a caller
+     *                                              can pay for COMPLEX on just the rows that need it.
      */
-    public function bulkLookup(array $items): SmartEnrichmentJob
+    public function bulkLookup(array $items, SmartEnrichmentMode|string|null $mode = null): SmartEnrichmentJob
     {
         if ($items === []) {
             throw new InvalidArgumentException('bulkLookup requires at least one item.');
@@ -116,7 +131,11 @@ final class SmartEnrichmentEndpoint
         }
 
         $uri = $this->uri('/smart-enrichment/bulk');
-        $payload = $this->jsonPost($uri, ['items' => $items]);
+        $body = array_filter([
+            'items' => $items,
+            'mode' => $this->normalizeMode($mode),
+        ], static fn ($v) => $v !== null);
+        $payload = $this->jsonPost($uri, $body);
 
         return SmartEnrichmentJob::fromArray($this->extractData($payload));
     }
@@ -268,6 +287,31 @@ final class SmartEnrichmentEndpoint
     // Input validation
     // ---------------------------------------------------------------------
 
+    /**
+     * Accept the enum or its raw string, and reject an unknown string here rather than letting the
+     * API return a 422 for a typo the SDK could have caught.
+     */
+    private function normalizeMode(SmartEnrichmentMode|string|null $mode): ?string
+    {
+        if ($mode === null) {
+            return null;
+        }
+        if ($mode instanceof SmartEnrichmentMode) {
+            return $mode->value;
+        }
+
+        $resolved = SmartEnrichmentMode::tryFrom(strtolower(trim($mode)));
+        if ($resolved === null) {
+            throw new InvalidArgumentException(sprintf(
+                'mode must be one of "%s", got "%s".',
+                implode('", "', array_column(SmartEnrichmentMode::cases(), 'value')),
+                $mode
+            ));
+        }
+
+        return $resolved->value;
+    }
+
     private function assertLookupInput(string $companyName, string $country): void
     {
         if (trim($companyName) === '') {
@@ -317,15 +361,26 @@ final class SmartEnrichmentEndpoint
         return $pairs === [] ? '' : '?' . implode('&', $pairs);
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * Read-only, so a transient gateway failure is retried (see RetryPolicy).
+     *
+     * @return array<string,mixed>
+     */
     private function jsonGet(string $uri): array
+    {
+        /** @var array<string,mixed> */
+        return $this->withRetries('Smart Enrichment request', fn () => $this->sendJsonGet($uri));
+    }
+
+    /** @return array<string,mixed> */
+    private function sendJsonGet(string $uri): array
     {
         $response = $this->send(fn () => $this->req->createRequest('GET', $uri));
         $code = $response->getStatusCode();
         $body = (string) $response->getBody();
 
         if ($code !== 200) {
-            throw new HttpException($body, $code, $body);
+            throw HttpException::fromResponse($code, $body, retryAfter: $this->retryAfterOf($response));
         }
 
         $payload = $this->decodeJson($body, $code);
@@ -336,9 +391,16 @@ final class SmartEnrichmentEndpoint
 
     /**
      * GET returning a raw (non-JSON) body such as a CSV download. Runs the same
-     * auth/401-refresh flow as jsonGet but skips JSON decoding on success.
+     * auth/401-refresh flow as jsonGet but skips JSON decoding on success, and is
+     * retried on a transient gateway failure (see RetryPolicy).
      */
     private function csvGet(string $uri): string
+    {
+        /** @var string */
+        return $this->withRetries('Smart Enrichment request', fn () => $this->sendCsvGet($uri));
+    }
+
+    private function sendCsvGet(string $uri): string
     {
         $response = $this->send(
             fn () => $this->req->createRequest('GET', $uri)->withHeader('Accept', 'text/csv, application/json'),
@@ -350,7 +412,7 @@ final class SmartEnrichmentEndpoint
             throw ValidationException::fromResponseBody($body);
         }
         if ($code !== 200) {
-            throw new HttpException($body, $code, $body);
+            throw HttpException::fromResponse($code, $body, retryAfter: $this->retryAfterOf($response));
         }
 
         return $body;
@@ -376,7 +438,7 @@ final class SmartEnrichmentEndpoint
             throw ValidationException::fromResponseBody($body);
         }
         if ($code !== 200 && $code !== 202) {
-            throw new HttpException($body, $code, $body);
+            throw HttpException::fromResponse($code, $body, retryAfter: $this->retryAfterOf($response));
         }
 
         $payload = $this->decodeJson($body, $code);
@@ -402,7 +464,7 @@ final class SmartEnrichmentEndpoint
             }
 
             if ($attempt++ >= 1) {
-                throw new AuthenticationException((string) $response->getBody(), 401);
+                throw AuthenticationException::fromResponse((string) $response->getBody());
             }
 
             $this->handleUnauthorized((string) $response->getBody());
@@ -425,13 +487,13 @@ final class SmartEnrichmentEndpoint
     private function refreshTokenOrFail(string $body): void
     {
         if ($this->tokens->get() === null) {
-            throw new AuthenticationException($body, 401);
+            throw AuthenticationException::fromResponse($body);
         }
 
         try {
             ($this->refreshCallback)();
         } catch (Throwable $exception) {
-            throw new AuthenticationException('Unauthorized and refresh failed: ' . $body, 401, $exception);
+            throw AuthenticationException::refreshFailed($body, $exception);
         }
     }
 

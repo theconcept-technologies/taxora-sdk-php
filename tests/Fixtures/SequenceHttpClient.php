@@ -8,20 +8,23 @@ use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use RuntimeException;
+use Throwable;
 
 /**
  * Simple HTTP client stub that returns predefined responses and records requests.
+ * An entry may also be a Throwable, which is thrown instead of returned — that is
+ * how a transport failure (connection reset, client timeout) is simulated.
  */
 final class SequenceHttpClient implements ClientInterface
 {
-    /** @var ResponseInterface[] */
+    /** @var array<int, ResponseInterface|Throwable> */
     private array $responses;
 
     /** @var RequestInterface[] */
     public array $requests = [];
 
     /**
-     * @param ResponseInterface[] $responses
+     * @param array<int, ResponseInterface|Throwable> $responses
      */
     public function __construct(array $responses)
     {
@@ -36,6 +39,11 @@ final class SequenceHttpClient implements ClientInterface
 
         $this->requests[] = $request;
 
-        return array_shift($this->responses);
+        $next = array_shift($this->responses);
+        if ($next instanceof Throwable) {
+            throw $next;
+        }
+
+        return $next;
     }
 }

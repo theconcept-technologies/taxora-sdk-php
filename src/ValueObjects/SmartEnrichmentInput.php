@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Taxora\Sdk\ValueObjects;
 
+use Taxora\Sdk\Enums\SmartEnrichmentMode;
+
 /**
  * The company record that was submitted for one Smart Enrichment lookup
  * (as echoed back by the API, e.g. on history rows).
@@ -16,6 +18,7 @@ final readonly class SmartEnrichmentInput
         public ?string $postalCode = null,
         public ?string $city = null,
         public ?string $country = null,
+        public ?SmartEnrichmentMode $mode = null,
     ) {
     }
 
@@ -28,6 +31,7 @@ final readonly class SmartEnrichmentInput
             postalCode: isset($data['postalCode']) ? (string) $data['postalCode'] : null,
             city: isset($data['city']) ? (string) $data['city'] : null,
             country: isset($data['country']) ? (string) $data['country'] : null,
+            mode: isset($data['mode']) ? SmartEnrichmentMode::tryFrom((string) $data['mode']) : null,
         );
     }
 }

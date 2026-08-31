@@ -13,11 +13,14 @@ use Taxora\Sdk\Exceptions\AuthenticationException;
 use Taxora\Sdk\Exceptions\HttpException;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
+use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
 use Throwable;
 
 final class CompanyEndpoint
 {
+    use Concerns\RetriesTransientErrors;
+
     private readonly Closure $refreshCallback;
 
     public function __construct(
@@ -28,9 +31,11 @@ final class CompanyEndpoint
         private readonly TokenStorageInterface $tokens,
         callable $refreshCallback,
         private readonly string $baseUrl,
-        private readonly ApiVersion $apiVersion = ApiVersion::V1
+        private readonly ApiVersion $apiVersion = ApiVersion::V1,
+        ?RetryPolicy $retryPolicy = null
     ) {
         $this->refreshCallback = Closure::fromCallable($refreshCallback);
+        $this->retryPolicy = $retryPolicy ?? new RetryPolicy();
     }
 
     /**
@@ -65,13 +70,22 @@ final class CompanyEndpoint
     public function get(): array
     {
         $uri = sprintf('%s/%s/company', $this->baseUrl, $this->apiVersion->value);
-        $response = $this->send(fn () => $this->req->createRequest('GET', $uri));
 
-        if ($response->getStatusCode() !== 200) {
-            throw new HttpException((string) $response->getBody(), $response->getStatusCode());
-        }
+        // Read-only, so a transient gateway failure is retried (see RetryPolicy).
+        /** @var array<string,mixed> */
+        return $this->withRetries('company request', function () use ($uri): array {
+            $response = $this->send(fn () => $this->req->createRequest('GET', $uri));
 
-        return (array) json_decode((string) $response->getBody(), true);
+            if ($response->getStatusCode() !== 200) {
+                throw HttpException::fromResponse(
+                    $response->getStatusCode(),
+                    (string) $response->getBody(),
+                    retryAfter: $this->retryAfterOf($response)
+                );
+            }
+
+            return (array) json_decode((string) $response->getBody(), true);
+        });
     }
 
     /** @param callable():\Psr\Http\Message\RequestInterface $factory */
@@ -92,7 +106,7 @@ final class CompanyEndpoint
             }
 
             if ($attempt++ >= 1) {
-                throw new AuthenticationException((string) $response->getBody(), 401);
+                throw AuthenticationException::fromResponse((string) $response->getBody());
             }
 
             $this->handleUnauthorized((string) $response->getBody());
@@ -115,13 +129,13 @@ final class CompanyEndpoint
     private function refreshTokenOrFail(string $body): void
     {
         if ($this->tokens->get() === null) {
-            throw new AuthenticationException($body, 401);
+            throw AuthenticationException::fromResponse($body);
         }
 
         try {
             ($this->refreshCallback)();
         } catch (Throwable $exception) {
-            throw new AuthenticationException('Unauthorized and refresh failed: ' . $body, 401, $exception);
+            throw AuthenticationException::refreshFailed($body, $exception);
         }
     }
 }

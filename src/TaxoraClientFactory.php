@@ -11,6 +11,7 @@ use Psr\Http\Message\RequestFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Taxora\Sdk\Enums\ApiVersion;
 use Taxora\Sdk\Enums\Environment;
+use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
 
 final class TaxoraClientFactory
@@ -26,6 +27,7 @@ final class TaxoraClientFactory
         ?Psr18Client $http = null,
         ?RequestFactoryInterface $requestFactory = null,
         ?StreamFactoryInterface $streamFactory = null,
+        ?RetryPolicy $retryPolicy = null,
     ): TaxoraClient {
         $http ??= Psr18ClientDiscovery::find();
         $requestFactory ??= Psr17FactoryDiscovery::findRequestFactory();
@@ -38,7 +40,8 @@ final class TaxoraClientFactory
             $apiKey,
             $tokenStorage,
             $environment,
-            $apiVersion
+            $apiVersion,
+            $retryPolicy
         );
     }
 }

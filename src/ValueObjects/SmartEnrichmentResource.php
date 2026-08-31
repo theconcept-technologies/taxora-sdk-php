@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Taxora\Sdk\ValueObjects;
 
+use Taxora\Sdk\Enums\SmartEnrichmentMode;
 use Taxora\Sdk\Enums\SmartEnrichmentStatus;
 
 /**
@@ -22,6 +23,23 @@ final readonly class SmartEnrichmentResource
         public ?string $matchedAddress = null,     // official/registered address of the match
         public ?string $country = null,
         public ?string $source = null,             // 'corpus' | 'registry:fr' | 'ai_web' | ...
+        public ?SmartEnrichmentMode $mode = null,  // the search mode this lookup actually ran in
+        /**
+         * What each AI provider independently concluded, when more than one searched. Two entries
+         * reporting the same vatNumber is the strongest confirmation this layer produces.
+         *
+         * @var list<array<string,mixed>>
+         */
+        public array $providerVerdicts = [],
+        /**
+         * What the API made of the address you submitted. The actionable part is `warnings`:
+         * 'postal_code_city_mismatch' / 'postal_code_unassigned' / 'postal_code_format_invalid'
+         * mean the postal code in your source record is wrong, and `derivedPlace` is where it
+         * actually points — worth writing back into your own data.
+         *
+         * @var array<string,mixed>|null
+         */
+        public ?array $addressQuality = null,
     ) {
     }
 
@@ -37,6 +55,11 @@ final readonly class SmartEnrichmentResource
             matchedAddress: isset($data['matchedAddress']) ? (string) $data['matchedAddress'] : null,
             country: isset($data['country']) ? (string) $data['country'] : null,
             source: isset($data['source']) ? (string) $data['source'] : null,
+            mode: isset($data['mode']) ? SmartEnrichmentMode::tryFrom((string) $data['mode']) : null,
+            providerVerdicts: is_array($data['providerVerdicts'] ?? null)
+                ? array_values(array_filter($data['providerVerdicts'], 'is_array'))
+                : [],
+            addressQuality: is_array($data['addressQuality'] ?? null) ? $data['addressQuality'] : null,
         );
     }
 
@@ -52,6 +75,9 @@ final readonly class SmartEnrichmentResource
             'matchedAddress' => $this->matchedAddress,
             'country' => $this->country,
             'source' => $this->source,
+            'mode' => $this->mode?->value,
+            'providerVerdicts' => $this->providerVerdicts,
+            'addressQuality' => $this->addressQuality,
         ];
     }
 }

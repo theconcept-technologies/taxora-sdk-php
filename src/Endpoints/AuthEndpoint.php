@@ -14,11 +14,14 @@ use Taxora\Sdk\Exceptions\AuthenticationException;
 use Taxora\Sdk\Exceptions\HttpException;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
+use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\Token;
 use Taxora\Sdk\Http\TokenStorageInterface;
 
 final class AuthEndpoint
 {
+    use Concerns\RetriesTransientErrors;
+
     public function __construct(
         private readonly ClientInterface $http,
         private readonly RequestFactoryInterface $req,
@@ -27,8 +30,10 @@ final class AuthEndpoint
         private readonly AuthMiddleware $auth,
         private readonly TokenStorageInterface $store,
         private readonly string $baseUrl,
-        private readonly ApiVersion $apiVersion = ApiVersion::V1
+        private readonly ApiVersion $apiVersion = ApiVersion::V1,
+        ?RetryPolicy $retryPolicy = null
     ) {
+        $this->retryPolicy = $retryPolicy ?? new RetryPolicy();
     }
 
     /** Perform login and persist the received token. */
@@ -45,24 +50,29 @@ final class AuthEndpoint
             'device_name' => $this->resolveDevice($device),
         ];
 
-        /** @psalm-suppress PossiblyFalseArgument */
-        $req = $this->req->createRequest('POST', $uri)
-            ->withHeader('Content-Type', 'application/json')
-            ->withBody($this->stream->createStream(json_encode($body, JSON_UNESCAPED_SLASHES)));
+        // The request is rebuilt per attempt so a retry never re-sends a body
+        // stream that the previous attempt already consumed.
+        $payload = (array) $this->withRetries('login', function () use ($uri, $body): array {
+            /** @psalm-suppress PossiblyFalseArgument */
+            $req = $this->req->createRequest('POST', $uri)
+                ->withHeader('Content-Type', 'application/json')
+                ->withBody($this->stream->createStream(json_encode($body, JSON_UNESCAPED_SLASHES)));
 
-        $req = ($this->apiKey)($req);
-        // Login does not include bearer header
+            $req = ($this->apiKey)($req);
+            // Login does not include bearer header
 
-        $res = $this->http->sendRequest($req);
-        $status = $res->getStatusCode();
-        if ($status === 401) {
-            throw new AuthenticationException((string) $res->getBody(), 401);
-        }
-        if ($status !== 200) {
-            throw new HttpException((string) $res->getBody(), $status, (string) $res->getBody());
-        }
+            $res = $this->http->sendRequest($req);
+            $status = $res->getStatusCode();
+            if ($status === 401) {
+                throw AuthenticationException::fromResponse((string) $res->getBody());
+            }
+            if ($status !== 200) {
+                throw HttpException::fromResponse($status, (string) $res->getBody(), retryAfter: $this->retryAfterOf($res));
+            }
 
-        $payload = (array) json_decode((string) $res->getBody(), true);
+            return (array) json_decode((string) $res->getBody(), true);
+        });
+
         if (!$this->isSuccessfulResponse($payload)) {
             throw new AuthenticationException('Authentication failed.', 401);
         }
@@ -83,22 +93,25 @@ final class AuthEndpoint
     public function refresh(): Token
     {
         $uri = sprintf('%s/%s/refresh', $this->baseUrl, $this->apiVersion->value);
-        $req = $this->req->createRequest('POST', $uri)
-            ->withHeader('Content-Type', 'application/json');
 
-        $req = ($this->apiKey)($req);
-        $req = ($this->auth)($req);
+        $payload = (array) $this->withRetries('token refresh', function () use ($uri): array {
+            $req = $this->req->createRequest('POST', $uri)
+                ->withHeader('Content-Type', 'application/json');
 
-        $res = $this->http->sendRequest($req);
-        $status = $res->getStatusCode();
-        if ($status === 401) {
-            throw new AuthenticationException((string) $res->getBody(), 401);
-        }
-        if ($status !== 200) {
-            throw new HttpException((string) $res->getBody(), $status, (string) $res->getBody());
-        }
+            $req = ($this->apiKey)($req);
+            $req = ($this->auth)($req);
 
-        $payload = (array) json_decode((string) $res->getBody(), true);
+            $res = $this->http->sendRequest($req);
+            $status = $res->getStatusCode();
+            if ($status === 401) {
+                throw AuthenticationException::fromResponse((string) $res->getBody());
+            }
+            if ($status !== 200) {
+                throw HttpException::fromResponse($status, (string) $res->getBody(), retryAfter: $this->retryAfterOf($res));
+            }
+
+            return (array) json_decode((string) $res->getBody(), true);
+        });
         $token = $this->hydrateToken($payload);
         $this->store->set($token);
 

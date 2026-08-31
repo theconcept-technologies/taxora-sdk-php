@@ -204,7 +204,7 @@ final class AuthTest extends TestCase
             $endpoint->login('user@example.com', 'wrong-secret', 'unit-test-device');
             $this->fail('Expected AuthenticationException to be thrown.');
         } catch (AuthenticationException $exception) {
-            self::assertSame('{"success":0,"message":"invalid credentials"}', $exception->getMessage());
+            self::assertSame('invalid credentials', $exception->getMessage());
         }
 
         self::assertNull($store->get());
@@ -243,7 +243,7 @@ final class AuthTest extends TestCase
             $endpoint->login('user@example.com', 'secret', 'unit-test-device');
             $this->fail('Expected HttpException to be thrown.');
         } catch (HttpException $exception) {
-            self::assertSame('{"success":0,"message":"server down"}', $exception->getMessage());
+            self::assertSame('server down', $exception->getMessage());
             self::assertSame(500, $exception->getStatusCode());
             self::assertSame('{"success":0,"message":"server down"}', $exception->getResponseBody());
         }
@@ -314,7 +314,7 @@ final class AuthTest extends TestCase
             $endpoint->refresh();
             $this->fail('Expected AuthenticationException to be thrown.');
         } catch (AuthenticationException $exception) {
-            self::assertSame('{"success":0,"message":"token expired"}', $exception->getMessage());
+            self::assertSame('token expired', $exception->getMessage());
         }
 
         $stored = $store->get();
@@ -355,7 +355,7 @@ final class AuthTest extends TestCase
             $endpoint->refresh();
             $this->fail('Expected HttpException to be thrown.');
         } catch (HttpException $exception) {
-            self::assertSame('{"success":0,"message":"service unavailable"}', $exception->getMessage());
+            self::assertSame('service unavailable', $exception->getMessage());
             self::assertSame(500, $exception->getStatusCode());
             self::assertSame('{"success":0,"message":"service unavailable"}', $exception->getResponseBody());
         }
