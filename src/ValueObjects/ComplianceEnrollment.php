@@ -5,15 +5,19 @@ declare(strict_types=1);
 namespace Taxora\Sdk\ValueObjects;
 
 use Taxora\Sdk\Enums\ComplianceEnrollmentStatus;
+use Taxora\Sdk\Enums\ComplianceService;
 
 /**
  * A compliance enrollment: the link between a Taxora company and a provider
- * account (B2Brouter) for one reporting regime (e.g. DGFiP Flux 10 in France).
+ * account (B2Brouter) for one country, one service and one regime — e.g.
+ * e-reporting via DGFiP Flux 10 in France (regime "dgfip_flux10") or
+ * e-invoicing via EHF / Peppol BIS 3.0 in Norway (regime "peppol_bis3").
  */
 final readonly class ComplianceEnrollment
 {
     /**
      * @param array<string,mixed> $regimeConfig regime-specific settings, e.g. naf_code / enterprise_size / type_operation
+     * @param ComplianceService|null $service the booked service; null when the server predates per-country services
      */
     public function __construct(
         public int $id,
@@ -34,6 +38,7 @@ final readonly class ComplianceEnrollment
         public bool $autoSend,
         public ?string $createdAt,
         public ?string $updatedAt,
+        public ?ComplianceService $service = null,
     ) {
     }
 
@@ -59,6 +64,7 @@ final readonly class ComplianceEnrollment
             autoSend: (bool) ($data['auto_send'] ?? false),
             createdAt: isset($data['created_at']) ? (string) $data['created_at'] : null,
             updatedAt: isset($data['updated_at']) ? (string) $data['updated_at'] : null,
+            service: isset($data['service']) ? ComplianceService::fromValue($data['service']) : null,
         );
     }
 }

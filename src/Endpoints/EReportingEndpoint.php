@@ -14,6 +14,7 @@ use Psr\Http\Message\RequestFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Taxora\Sdk\Enums\ApiVersion;
+use Taxora\Sdk\Enums\ComplianceService;
 use Taxora\Sdk\Enums\ComplianceTaxReportState;
 use Taxora\Sdk\Enums\ComplianceTransactionState;
 use Taxora\Sdk\Enums\ComplianceTransactionType;
@@ -24,6 +25,7 @@ use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
 use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
+use Taxora\Sdk\Support\NorwegianOrgNumber;
 use Taxora\Sdk\ValueObjects\ComplianceEnrollment;
 use Taxora\Sdk\ValueObjects\ComplianceEnrollmentPage;
 use Taxora\Sdk\ValueObjects\ComplianceImportResult;
@@ -33,22 +35,34 @@ use Taxora\Sdk\ValueObjects\ComplianceTaxReportPage;
 use Taxora\Sdk\ValueObjects\ComplianceTransaction;
 use Taxora\Sdk\ValueObjects\ComplianceTransactionPage;
 use Taxora\Sdk\ValueObjects\ComplianceVatRates;
+use Taxora\Sdk\ValueObjects\PeppolLookupResult;
+use Taxora\Sdk\ValueObjects\RegistryCompany;
 use Taxora\Sdk\ValueObjects\RevenueStatistics;
 use Taxora\Sdk\ValueObjects\SireneLookupResult;
 use Throwable;
 
 /**
- * E-Reporting / Compliance (DGFiP Flux 10) endpoints.
+ * Compliance endpoints: e-reporting / e-invoicing per country.
  *
- * Typical flow:
+ * Each enrollment books one service for one country — France: e-reporting (or
+ * e-invoicing) via DGFiP Flux 10; Norway: e-invoicing via EHF / Peppol BIS 3.0.
+ *
+ * Typical flow (France):
  *
  *   $prefill    = $client->eReporting()->sireneLookup('12345678900012');
  *   $enrollment = $client->eReporting()->createEnrollment(email: ..., nafCode: ..., ...);
  *   $tx         = $client->eReporting()->createTransaction(enrollmentId: $enrollment->id, ...);
  *   $reports    = $client->eReporting()->listTaxReports();
  *
+ * Typical flow (Norway):
+ *
+ *   $company    = $client->eReporting()->registryLookup('NO', '923609016')[0];
+ *   $enrollment = $client->eReporting()->createNorwayEnrollment(orgNumber: ..., ...);
+ *   $peppol     = $client->eReporting()->peppolLookup('NO', $buyerOrgNumber);
+ *   $tx         = $client->eReporting()->createTransaction(..., counterpartyRegisterId: $buyerOrgNumber);
+ *
  * All endpoints except {@see requestEReportingAccess()} require an active
- * E-Reporting feature grant / subscription (403 otherwise).
+ * e-reporting or e-invoicing feature grant / subscription (403 otherwise).
  */
 final class EReportingEndpoint
 {
@@ -65,6 +79,9 @@ final class EReportingEndpoint
         'crossborder_inbound',
     ];
     private const TRANSACTION_STATES = ['pending', 'sending', 'submitted', 'error'];
+    private const SERVICES = ['e_reporting', 'e_invoicing'];
+    /** Countries served by registryLookup() / peppolLookup(). */
+    private const LOOKUP_COUNTRIES = ['NO'];
 
     private readonly Closure $refreshCallback;
 
@@ -89,11 +106,16 @@ final class EReportingEndpoint
     // ---------------------------------------------------------------------
 
     /**
-     * Create a compliance enrollment and provision the provider account. By
-     * default the DGFiP tax-report setting is activated immediately; pass
-     * $autoActivate = false to only create the account.
+     * Create a FRANCE compliance enrollment (DGFiP Flux 10) and provision the
+     * provider account. By default the DGFiP tax-report setting is activated
+     * immediately; pass $autoActivate = false to only create the account.
+     * For Norway use {@see createNorwayEnrollment()}.
      *
      * At least one of $siret (14 characters) / $siren (9 characters) is required.
+     * $service picks the booked service ("e_reporting" — the server default — or
+     * "e_invoicing"); the company must have that service unlocked, otherwise the
+     * server answers 403 with code "service_not_active" ({@see HttpException}).
+     *
      * Provider failures surface as an {@see HttpException} with status code 502 —
      * the enrollment is persisted server-side in an error state and shows up in
      * listEnrollments() for retries.
@@ -115,10 +137,12 @@ final class EReportingEndpoint
         ?string $country = null,
         ?string $regime = null,
         ?bool $autoActivate = null,
+        ComplianceService|string|null $service = null,
     ): ComplianceEnrollment {
-        if (trim($email) === '' || !str_contains($email, '@')) {
-            throw new InvalidArgumentException('email must be a valid e-mail address.');
+        if ($country !== null && strtoupper($country) === 'NO') {
+            throw new InvalidArgumentException('Norwegian enrollments use createNorwayEnrollment().');
         }
+        $this->assertEmail($email, 'email');
         if (preg_match('/^\d{2}$/', $nafCode) !== 1) {
             throw new InvalidArgumentException('nafCode must be exactly 2 digits (NAF division), e.g. "47".');
         }
@@ -139,6 +163,7 @@ final class EReportingEndpoint
 
         $body = array_filter([
             'country' => $country,
+            'service' => $service !== null ? $this->enumValue($service, self::SERVICES, 'service') : null,
             'regime' => $regime,
             'siret' => $siret,
             'siren' => $siren,
@@ -153,6 +178,84 @@ final class EReportingEndpoint
             'enterprise_size' => $enterpriseSize,
             'type_operation' => $typeOperation,
             'reporting_start_date' => $this->formatDate($reportingStartDate),
+            'auto_activate' => $autoActivate,
+        ], static fn ($v) => $v !== null);
+
+        $payload = $this->jsonPost($this->uri('/compliance/enrollments'), $body);
+
+        return ComplianceEnrollment::fromArray($this->extractData($payload));
+    }
+
+    /**
+     * Create a NORWAY e-invoicing enrollment (EHF 3.0 = Peppol BIS Billing 3.0)
+     * and provision the provider account. By default the company is registered
+     * on Peppol immediately; pass $autoActivate = false to only create the
+     * account. Tip: prefill the company data with {@see registryLookup()}.
+     *
+     * $orgNumber is the 9-digit Norwegian organisation number (also the Peppol
+     * id under scheme 0192). Spaces, a "NO" prefix and an "MVA" suffix are
+     * accepted and stripped; a wrong check digit is rejected before any request.
+     *
+     * Norway is billed per country: a one-off setup fee when the regime is
+     * activated plus a price per document. The company must have e-invoicing
+     * unlocked — otherwise the server answers 403 with code
+     * "service_not_active" ({@see HttpException}). Provider failures surface as
+     * an {@see HttpException} with status code 502.
+     *
+     * @param bool|null $vatRegistered      registered in the Norwegian VAT register (MVA); server default true
+     * @param bool|null $enterpriseRegister registered in Foretaksregisteret — adds the mandatory note to invoices; server default false
+     * @param bool|null $reception          also register to RECEIVE e-invoices over Peppol; server default false
+     * @param string|null $legalCountry     ISO 3166-1 alpha-2 country of the legal entity, when not Norway
+     */
+    public function createNorwayEnrollment(
+        string $email,
+        string $orgNumber,
+        string $companyName,
+        string $address,
+        string $city,
+        string $postalcode,
+        ?bool $vatRegistered = null,
+        ?bool $enterpriseRegister = null,
+        ?bool $reception = null,
+        ?string $vatNumber = null,
+        ?string $province = null,
+        ?string $legalCountry = null,
+        DateTimeInterface|string|null $reportingStartDate = null,
+        ?bool $autoActivate = null,
+    ): ComplianceEnrollment {
+        $this->assertEmail($email, 'email');
+        $orgNumber = $this->norwegianOrgNumber($orgNumber, 'orgNumber');
+        foreach ([
+            'companyName' => [$companyName, 255],
+            'address' => [$address, 255],
+            'city' => [$city, 100],
+            'postalcode' => [$postalcode, 20],
+        ] as $param => [$value, $max]) {
+            if (trim($value) === '') {
+                throw new InvalidArgumentException(sprintf('%s must not be empty.', $param));
+            }
+            $this->assertMaxLength($value, $max, $param);
+        }
+        if ($legalCountry !== null) {
+            $this->assertCountryCode($legalCountry, 'legalCountry');
+        }
+
+        $body = array_filter([
+            'country' => 'NO',
+            'service' => ComplianceService::E_INVOICING->value,
+            'org_number' => $orgNumber,
+            'vat_number' => $vatNumber,
+            'company_name' => $companyName,
+            'address' => $address,
+            'city' => $city,
+            'postalcode' => $postalcode,
+            'province' => $province,
+            'legal_country' => $legalCountry !== null ? strtoupper($legalCountry) : null,
+            'email' => $email,
+            'vat_registered' => $vatRegistered,
+            'enterprise_register' => $enterpriseRegister,
+            'reception' => $reception,
+            'reporting_start_date' => $reportingStartDate !== null ? $this->formatDate($reportingStartDate) : null,
             'auto_activate' => $autoActivate,
         ], static fn ($v) => $v !== null);
 
@@ -203,16 +306,109 @@ final class EReportingEndpoint
         return SireneLookupResult::fromArray($this->extractData($this->jsonGet($uri)));
     }
 
+    /**
+     * Look up companies in a national company register — Norway ("NO"):
+     * Brønnøysund Enhetsregisteret. $q is an organisation number (spaces,
+     * "NO…MVA" accepted → at most one result) or a company name (search).
+     * Handy to prefill createNorwayEnrollment() and the buyer fields of an
+     * e-invoice. For France use {@see sireneLookup()}.
+     *
+     * Nothing found yields an {@see HttpException} with status code 404; an
+     * invalid query a {@see ValidationException}. Rate limit: 30 requests per
+     * minute per user (429 beyond).
+     *
+     * @return list<RegistryCompany>
+     */
+    public function registryLookup(string $country, string $q): array
+    {
+        $country = $this->lookupCountry($country);
+        $q = trim($q);
+        if ($q === '') {
+            throw new InvalidArgumentException('q must not be empty.');
+        }
+
+        // A number-shaped query is checked (and normalised) locally — the server
+        // rejects a wrong check digit with a 422 anyway.
+        if (preg_match('/^\d{9}$/', NorwegianOrgNumber::normalize($q)) === 1) {
+            $q = $this->norwegianOrgNumber($q, 'q');
+        }
+
+        $uri = $this->uri('/compliance/registry-lookup' . $this->buildQuery([
+            'country' => $country,
+            'q' => $q,
+        ]));
+
+        $data = $this->extractData($this->jsonGet($uri));
+
+        $results = [];
+        foreach (is_array($data['results'] ?? null) ? $data['results'] : [] as $row) {
+            if (is_array($row)) {
+                /** @var array<string,mixed> $row */
+                $results[] = RegistryCompany::fromArray($row);
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Check in the Peppol directory whether a participant — e.g. a Norwegian
+     * buyer by organisation number — can receive e-invoices. In Norway a
+     * reachable buyer (registered in ELMA) must receive an EHF e-invoice.
+     *
+     * The directory resolves asynchronously: {@see PeppolLookupResult::$status}
+     * PENDING (reachable = null) means "ask again in a few seconds". Definite
+     * answers are cached server-side for 24h. Free of charge.
+     *
+     * $scheme defaults server-side to 0192 (Norwegian organisation number); for
+     * that scheme $id is validated (check digit) and normalised before sending.
+     */
+    public function peppolLookup(string $country, string $id, ?string $scheme = null): PeppolLookupResult
+    {
+        $country = $this->lookupCountry($country);
+        $scheme = $scheme !== null ? trim($scheme) : null;
+
+        if ($scheme === null || $scheme === '' || $scheme === NorwegianOrgNumber::PEPPOL_SCHEME) {
+            $id = $this->norwegianOrgNumber($id, 'id');
+        } else {
+            if (preg_match('/^\d{4}$/', $scheme) !== 1) {
+                throw new InvalidArgumentException('scheme must be a 4-digit Peppol identifier scheme, e.g. "0192".');
+            }
+            $id = trim($id);
+            if ($id === '') {
+                throw new InvalidArgumentException('id must not be empty.');
+            }
+            $this->assertMaxLength($id, 50, 'id');
+        }
+
+        $uri = $this->uri('/compliance/peppol-lookup' . $this->buildQuery([
+            'country' => $country,
+            'id' => $id,
+            'scheme' => $scheme !== '' ? $scheme : null,
+        ]));
+
+        return PeppolLookupResult::fromArray($this->extractData($this->jsonGet($uri)));
+    }
+
     // ---------------------------------------------------------------------
     // Transactions
     // ---------------------------------------------------------------------
 
     /**
-     * Record and (optionally) submit a Flux 10 transaction.
+     * Record and (optionally) submit a compliance transaction (France: Flux 10;
+     * Norway: EHF / Peppol BIS 3.0 e-invoice).
      *
      * Immediate per-invoice submission requires the e-invoicing feature on the
      * account; in pure e-reporting mode the transaction is only recorded and
      * reported via the aggregated daily ledgers.
+     *
+     * Norway: $transactionType must be "b2b_domestic_outbound", and the server
+     * requires $counterpartyRegisterId (the buyer's organisation number — check
+     * reachability first with {@see peppolLookup()}) and $counterpartyName
+     * unless $providerContactId points to a stored provider contact. A credit
+     * note sets $isCreditNote and references the corrected invoice via
+     * $amendedNumber (+ optional $amendedDate). $buyerReference defaults
+     * server-side to the buyer's organisation number (Peppol requires one).
      *
      * Creation is idempotent on the invoice's natural key (enrollment + type +
      * invoice number + invoice date + counterparty VAT): a retried create
@@ -221,6 +417,8 @@ final class EReportingEndpoint
      * {@see HttpException} with status code 502.
      *
      * @param list<ComplianceInvoiceLine> $invoiceLines at least one line, each with at least one tax
+     * @param string|null $counterpartyRegisterId buyer's company register id (Norway: 9-digit organisation number, check digit validated)
+     * @param string|null $extraInfo free-text invoice note (max 1000 characters); mandatory Norwegian notes are added server-side
      */
     public function createTransaction(
         int $enrollmentId,
@@ -242,6 +440,16 @@ final class EReportingEndpoint
         ?string $paymentMethodText = null,
         ?string $paymentTerms = null,
         ?bool $submitNow = null,
+        ?string $counterpartyRegisterId = null,
+        ?string $counterpartyAddress = null,
+        ?string $counterpartyCity = null,
+        ?string $counterpartyPostalcode = null,
+        ?string $counterpartyEmail = null,
+        ?string $buyerReference = null,
+        ?bool $isCreditNote = null,
+        ?string $amendedNumber = null,
+        DateTimeInterface|string|null $amendedDate = null,
+        ?string $extraInfo = null,
     ): ComplianceTransaction {
         $this->assertPositiveId($enrollmentId, 'enrollmentId');
         $type = $this->enumValue($transactionType, self::TRANSACTION_TYPES, 'transactionType');
@@ -257,6 +465,19 @@ final class EReportingEndpoint
         if ($counterpartyCountry !== null && strlen($counterpartyCountry) !== 2) {
             throw new InvalidArgumentException('counterpartyCountry must be an ISO 3166-1 alpha-2 code (exactly 2 characters).');
         }
+
+        $invoiceFields = $this->invoiceFields(
+            $counterpartyRegisterId,
+            $counterpartyAddress,
+            $counterpartyCity,
+            $counterpartyPostalcode,
+            $counterpartyEmail,
+            $buyerReference,
+            $isCreditNote,
+            $amendedNumber,
+            $amendedDate,
+            $extraInfo,
+        );
 
         $body = array_filter([
             'compliance_enrollment_id' => $enrollmentId,
@@ -278,7 +499,7 @@ final class EReportingEndpoint
             'payment_method_text' => $paymentMethodText,
             'payment_terms' => $paymentTerms,
             'submit_now' => $submitNow,
-        ], static fn ($v) => $v !== null);
+        ], static fn ($v) => $v !== null) + $invoiceFields;
 
         $payload = $this->jsonPost($this->uri('/compliance/transactions'), $body);
 
@@ -287,9 +508,10 @@ final class EReportingEndpoint
 
     /**
      * Paginated list of the company's transactions (newest invoice date first),
-     * optionally filtered by invoice-date range, state and type. Unlike the
-     * other list endpoints the server VALIDATES $perPage (1-100) instead of
-     * clamping it — out-of-range values yield a {@see ValidationException}.
+     * optionally filtered by invoice-date range, state, type, enrollment and
+     * country (e.g. "NO" to see only Norwegian e-invoices). Unlike the other
+     * list endpoints the server VALIDATES $perPage (1-100) instead of clamping
+     * it — out-of-range values yield a {@see ValidationException}.
      */
     public function listTransactions(
         DateTimeInterface|string|null $dateFrom = null,
@@ -298,7 +520,16 @@ final class EReportingEndpoint
         ComplianceTransactionType|string|null $transactionType = null,
         int $page = 1,
         int $perPage = 25,
+        ?int $complianceEnrollmentId = null,
+        ?string $country = null,
     ): ComplianceTransactionPage {
+        if ($complianceEnrollmentId !== null) {
+            $this->assertPositiveId($complianceEnrollmentId, 'complianceEnrollmentId');
+        }
+        if ($country !== null) {
+            $this->assertCountryCode($country, 'country');
+        }
+
         $uri = $this->uri('/compliance/transactions' . $this->buildQuery([
             'date_from' => $dateFrom !== null ? $this->formatDate($dateFrom) : null,
             'date_to' => $dateTo !== null ? $this->formatDate($dateTo) : null,
@@ -306,6 +537,8 @@ final class EReportingEndpoint
             'transaction_type' => $transactionType !== null
                 ? $this->enumValue($transactionType, self::TRANSACTION_TYPES, 'transactionType')
                 : null,
+            'compliance_enrollment_id' => $complianceEnrollmentId !== null ? (string) $complianceEnrollmentId : null,
+            'country' => $country !== null ? strtoupper($country) : null,
             'page' => (string) $page,
             'per_page' => (string) $perPage,
         ]));
@@ -333,6 +566,9 @@ final class EReportingEndpoint
      * (due_date, tax_amount, counterparty_*, …) cannot be explicitly cleared
      * through this method.
      *
+     * The e-invoicing fields ($counterpartyRegisterId … $extraInfo) behave as in
+     * {@see createTransaction()}; they are merged into the stored ones.
+     *
      * @param list<ComplianceInvoiceLine>|null $invoiceLines when provided, replaces all invoice lines
      */
     public function updateTransaction(
@@ -354,6 +590,16 @@ final class EReportingEndpoint
         ?string $remittanceInformation = null,
         ?string $paymentMethodText = null,
         ?string $paymentTerms = null,
+        ?string $counterpartyRegisterId = null,
+        ?string $counterpartyAddress = null,
+        ?string $counterpartyCity = null,
+        ?string $counterpartyPostalcode = null,
+        ?string $counterpartyEmail = null,
+        ?string $buyerReference = null,
+        ?bool $isCreditNote = null,
+        ?string $amendedNumber = null,
+        DateTimeInterface|string|null $amendedDate = null,
+        ?string $extraInfo = null,
     ): ComplianceTransaction {
         $this->assertPositiveId($id, 'id');
         if ($invoiceNumber !== null) {
@@ -391,7 +637,18 @@ final class EReportingEndpoint
             'remittance_information' => $remittanceInformation,
             'payment_method_text' => $paymentMethodText,
             'payment_terms' => $paymentTerms,
-        ], static fn ($v) => $v !== null);
+        ], static fn ($v) => $v !== null) + $this->invoiceFields(
+            $counterpartyRegisterId,
+            $counterpartyAddress,
+            $counterpartyCity,
+            $counterpartyPostalcode,
+            $counterpartyEmail,
+            $buyerReference,
+            $isCreditNote,
+            $amendedNumber,
+            $amendedDate,
+            $extraInfo,
+        );
 
         if ($body === []) {
             throw new InvalidArgumentException('updateTransaction requires at least one field to update.');
@@ -598,11 +855,14 @@ final class EReportingEndpoint
     // ---------------------------------------------------------------------
 
     /**
-     * Ask the Taxora team to activate E-Reporting for your account. This is the
-     * one compliance endpoint that is NOT gated by the E-Reporting feature —
-     * it exists precisely for customers who do not have access yet. Identity
-     * defaults to the authenticated user; the parameters are only fallbacks /
-     * extra context for the activation request.
+     * Ask the Taxora team to activate a compliance service for your account.
+     * This is the one compliance endpoint that is NOT gated by the compliance
+     * feature — it exists precisely for customers who do not have access yet.
+     * Identity defaults to the authenticated user; the parameters are only
+     * fallbacks / extra context for the activation request.
+     *
+     * @param ComplianceService|string|null $service "e_reporting" (server default) or "e_invoicing"
+     * @param list<string>|null $countries ISO 3166-1 alpha-2 codes of the countries you need, e.g. ['NO'] (max 30)
      */
     public function requestEReportingAccess(
         ?string $name = null,
@@ -611,7 +871,24 @@ final class EReportingEndpoint
         ?string $phone = null,
         ?string $message = null,
         ?string $language = null,
+        ComplianceService|string|null $service = null,
+        ?array $countries = null,
     ): void {
+        if ($countries !== null) {
+            if (count($countries) > 30) {
+                throw new InvalidArgumentException('countries must not contain more than 30 entries.');
+            }
+            $normalized = [];
+            foreach ($countries as $index => $country) {
+                if (!is_string($country)) {
+                    throw new InvalidArgumentException(sprintf('countries[%s] must be a string.', (string) $index));
+                }
+                $this->assertCountryCode($country, sprintf('countries[%s]', (string) $index));
+                $normalized[] = strtoupper($country);
+            }
+            $countries = $normalized;
+        }
+
         $body = array_filter([
             'name' => $name,
             'email' => $email,
@@ -619,6 +896,8 @@ final class EReportingEndpoint
             'phone' => $phone,
             'message' => $message,
             'language' => $language,
+            'service' => $service !== null ? $this->enumValue($service, self::SERVICES, 'service') : null,
+            'countries' => $countries,
         ], static fn ($v) => $v !== null);
 
         $this->jsonPost($this->uri('/compliance/e-reporting-request'), $body, [200, 201]);
@@ -672,6 +951,119 @@ final class EReportingEndpoint
         if (is_string($amount) && !is_numeric($amount)) {
             throw new InvalidArgumentException(sprintf('%s must be numeric.', $param));
         }
+    }
+
+    private function assertEmail(string $email, string $param): void
+    {
+        if (trim($email) === '' || !str_contains($email, '@')) {
+            throw new InvalidArgumentException(sprintf('%s must be a valid e-mail address.', $param));
+        }
+    }
+
+    /** Length in characters (UTF-8 aware without requiring ext-mbstring), like the server's max rule. */
+    private function assertMaxLength(string $value, int $max, string $param): void
+    {
+        $length = preg_match_all('/./su', $value);
+        if ($length === false) {
+            $length = strlen($value);
+        }
+        if ($length > $max) {
+            throw new InvalidArgumentException(sprintf('%s must not exceed %d characters.', $param, $max));
+        }
+    }
+
+    private function assertCountryCode(string $country, string $param): void
+    {
+        if (preg_match('/^[A-Za-z]{2}$/', $country) !== 1) {
+            throw new InvalidArgumentException(sprintf('%s must be an ISO 3166-1 alpha-2 code (exactly 2 letters).', $param));
+        }
+    }
+
+    /** Validate + normalise a Norwegian organisation number to its 9 digits. */
+    private function norwegianOrgNumber(string $value, string $param): string
+    {
+        if (!NorwegianOrgNumber::isValid($value)) {
+            throw new InvalidArgumentException(sprintf(
+                '%s must be a valid Norwegian organisation number (9 digits with a valid check digit).',
+                $param
+            ));
+        }
+
+        return NorwegianOrgNumber::normalize($value);
+    }
+
+    private function lookupCountry(string $country): string
+    {
+        $country = strtoupper(trim($country));
+        if (!in_array($country, self::LOOKUP_COUNTRIES, true)) {
+            throw new InvalidArgumentException(sprintf(
+                'country must be one of "%s", got "%s".',
+                implode('", "', self::LOOKUP_COUNTRIES),
+                $country
+            ));
+        }
+
+        return $country;
+    }
+
+    /**
+     * The e-invoicing buyer / document fields shared by create + update
+     * (validated against the server limits, null fields dropped).
+     *
+     * @return array<string,mixed>
+     */
+    private function invoiceFields(
+        ?string $counterpartyRegisterId,
+        ?string $counterpartyAddress,
+        ?string $counterpartyCity,
+        ?string $counterpartyPostalcode,
+        ?string $counterpartyEmail,
+        ?string $buyerReference,
+        ?bool $isCreditNote,
+        ?string $amendedNumber,
+        DateTimeInterface|string|null $amendedDate,
+        ?string $extraInfo,
+    ): array {
+        if ($counterpartyRegisterId !== null) {
+            if (trim($counterpartyRegisterId) === '') {
+                throw new InvalidArgumentException('counterpartyRegisterId must not be empty.');
+            }
+            $this->assertMaxLength($counterpartyRegisterId, 30, 'counterpartyRegisterId');
+            // Number-shaped ids are Norwegian organisation numbers today — catch a
+            // wrong check digit before the server does.
+            if (preg_match('/^\d{9}$/', NorwegianOrgNumber::normalize($counterpartyRegisterId)) === 1) {
+                $counterpartyRegisterId = $this->norwegianOrgNumber($counterpartyRegisterId, 'counterpartyRegisterId');
+            }
+        }
+        if ($counterpartyEmail !== null) {
+            $this->assertEmail($counterpartyEmail, 'counterpartyEmail');
+        }
+        foreach ([
+            'counterpartyAddress' => [$counterpartyAddress, 255],
+            'counterpartyCity' => [$counterpartyCity, 100],
+            'counterpartyPostalcode' => [$counterpartyPostalcode, 20],
+            'counterpartyEmail' => [$counterpartyEmail, 255],
+            'buyerReference' => [$buyerReference, 100],
+            'amendedNumber' => [$amendedNumber, 50],
+            'extraInfo' => [$extraInfo, 1000],
+        ] as $param => [$value, $max]) {
+            if ($value !== null) {
+                $this->assertMaxLength($value, $max, $param);
+            }
+        }
+
+        return array_filter([
+            'counterparty_register_id' => $counterpartyRegisterId,
+            'counterparty_address' => $counterpartyAddress,
+            'counterparty_city' => $counterpartyCity,
+            'counterparty_postalcode' => $counterpartyPostalcode,
+            'counterparty_email' => $counterpartyEmail,
+            'buyer_reference' => $buyerReference,
+            'is_credit_note' => $isCreditNote,
+            'amended_number' => $amendedNumber,
+            'amended_date' => $amendedDate !== null ? $this->formatDate($amendedDate) : null,
+            'extra_info' => $extraInfo,
+        ], static fn ($v) => $v !== null);
     }
 
     /**

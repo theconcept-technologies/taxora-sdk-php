@@ -8,10 +8,13 @@ use Http\Factory\Guzzle\StreamFactory;
 use PHPUnit\Framework\TestCase;
 use Taxora\Sdk\Endpoints\EReportingEndpoint;
 use Taxora\Sdk\Enums\ApiVersion;
+use Taxora\Sdk\Enums\ComplianceDocumentType;
 use Taxora\Sdk\Enums\ComplianceEnrollmentStatus;
+use Taxora\Sdk\Enums\ComplianceService;
 use Taxora\Sdk\Enums\ComplianceTaxReportState;
 use Taxora\Sdk\Enums\ComplianceTransactionState;
 use Taxora\Sdk\Enums\ComplianceTransactionType;
+use Taxora\Sdk\Enums\PeppolLookupStatus;
 use Taxora\Sdk\Exceptions\HttpException;
 use Taxora\Sdk\Exceptions\ValidationException;
 use Taxora\Sdk\Http\ApiKeyMiddleware;
@@ -22,6 +25,8 @@ use Taxora\Sdk\Tests\Fixtures\SequenceHttpClient;
 use Taxora\Sdk\ValueObjects\ComplianceInvoiceLine;
 use Taxora\Sdk\ValueObjects\ComplianceLineTax;
 use Taxora\Sdk\ValueObjects\ComplianceTransaction;
+use Taxora\Sdk\ValueObjects\PeppolLookupResult;
+use Taxora\Sdk\ValueObjects\RegistryCompany;
 use Taxora\Sdk\ValueObjects\RevenueStatistics;
 use Taxora\Sdk\ValueObjects\RevenueTimeBucket;
 use Taxora\Sdk\ValueObjects\RevenueTotals;
@@ -1226,6 +1231,616 @@ final class EReportingEndpointTest extends TestCase
         self::assertSame('', $http->requests[0]->getUri()->getQuery());
     }
 
+    /* ---------- e-invoicing Norway (EHF / Peppol) ---------- */
+
+    public function testCreateNorwayEnrollmentPostsNorwayBodyWithNormalizedOrgNumber(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::norwayEnrollmentPayload(),
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $enrollment = $this->createEndpoint($http)->createNorwayEnrollment(
+            email: 'faktura@equinor.no',
+            orgNumber: 'NO 923 609 016 MVA',
+            companyName: 'EQUINOR ASA',
+            address: 'Forusbeen 50',
+            city: 'Stavanger',
+            postalcode: '4035',
+            enterpriseRegister: true,
+            reception: false,
+            autoActivate: true,
+        );
+
+        $request = $http->requests[0];
+        self::assertSame('POST', $request->getMethod());
+        self::assertSame('/v1/compliance/enrollments', $request->getUri()->getPath());
+
+        $payload = json_decode((string) $request->getBody(), true);
+        self::assertSame([
+            'country' => 'NO',
+            'service' => 'e_invoicing',
+            'org_number' => '923609016',
+            'company_name' => 'EQUINOR ASA',
+            'address' => 'Forusbeen 50',
+            'city' => 'Stavanger',
+            'postalcode' => '4035',
+            'email' => 'faktura@equinor.no',
+            'enterprise_register' => true,
+            'reception' => false,
+            'auto_activate' => true,
+        ], $payload, 'Only provided fields are sent; vat_registered defers to the server default (true)');
+
+        self::assertSame(ComplianceService::E_INVOICING, $enrollment->service);
+        self::assertSame('peppol_bis3', $enrollment->regime);
+        self::assertSame('no', $enrollment->country);
+        self::assertSame('0192', $enrollment->companyRegisterScheme);
+        self::assertSame(ComplianceEnrollmentStatus::REGIME_ACTIVATED, $enrollment->status);
+    }
+
+    public function testCreateNorwayEnrollmentRejectsInvalidOrgNumberBeforeHttp(): void
+    {
+        $http = new SequenceHttpClient([]);
+
+        try {
+            $this->createEndpoint($http)->createNorwayEnrollment(
+                email: 'faktura@equinor.no',
+                orgNumber: '923609017',
+                companyName: 'EQUINOR ASA',
+                address: 'Forusbeen 50',
+                city: 'Stavanger',
+                postalcode: '4035',
+            );
+            self::fail('Expected InvalidArgumentException was not thrown.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertStringContainsString('orgNumber must be a valid Norwegian organisation number', $exception->getMessage());
+        }
+
+        self::assertCount(0, $http->requests, 'No HTTP request should be made when validation fails.');
+    }
+
+    public function testCreateNorwayEnrollmentRequiresCompanyData(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('city must not be empty.');
+
+        $endpoint->createNorwayEnrollment(
+            email: 'faktura@equinor.no',
+            orgNumber: '923609016',
+            companyName: 'EQUINOR ASA',
+            address: 'Forusbeen 50',
+            city: ' ',
+            postalcode: '4035',
+        );
+    }
+
+    public function testCreateEnrollmentRedirectsNorwayToDedicatedMethod(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Norwegian enrollments use createNorwayEnrollment().');
+
+        $endpoint->createEnrollment(
+            email: 'tax@acme.fr',
+            nafCode: '47',
+            enterpriseSize: 'pme',
+            typeOperation: 'mixed',
+            reportingStartDate: '2026-09-01',
+            siren: '123456789',
+            country: 'no',
+        );
+    }
+
+    public function testCreateEnrollmentSendsOptionalServiceAndParsesIt(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::enrollmentPayload(['service' => 'e_invoicing']),
+            ])),
+        ]);
+
+        $enrollment = $this->createEndpoint($http)->createEnrollment(
+            email: 'tax@acme.fr',
+            nafCode: '47',
+            enterpriseSize: 'pme',
+            typeOperation: 'mixed',
+            reportingStartDate: '2026-09-01',
+            siren: '123456789',
+            service: ComplianceService::E_INVOICING,
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame('e_invoicing', $payload['service']);
+        self::assertSame(ComplianceService::E_INVOICING, $enrollment->service);
+    }
+
+    public function testCreateEnrollmentRejectsUnknownService(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('service must be one of "e_reporting", "e_invoicing", got "e_archiving".');
+
+        $endpoint->createEnrollment(
+            email: 'tax@acme.fr',
+            nafCode: '47',
+            enterpriseSize: 'pme',
+            typeOperation: 'mixed',
+            reportingStartDate: '2026-09-01',
+            siren: '123456789',
+            service: 'e_archiving',
+        );
+    }
+
+    public function testEnrollmentServiceParsingIsTolerant(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [
+                    'data' => [
+                        self::enrollmentPayload(['service' => 'e_reporting']),
+                        self::enrollmentPayload(['id' => 13, 'service' => 'e_archiving']),
+                        self::enrollmentPayload(['id' => 14]),
+                    ],
+                    'meta' => ['current_page' => 1, 'per_page' => 25, 'total' => 3, 'last_page' => 1],
+                ],
+            ])),
+        ]);
+
+        $page = $this->createEndpoint($http)->listEnrollments();
+
+        self::assertSame(ComplianceService::E_REPORTING, $page->rows[0]->service);
+        self::assertSame(ComplianceService::UNKNOWN, $page->rows[1]->service, 'Unknown services degrade gracefully');
+        self::assertNull($page->rows[2]->service, 'Older servers omit the field');
+    }
+
+    public function testServiceNotActiveSurfacesAs403HttpException(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(403, ['Content-Type' => 'application/json'], json_encode([
+                'success' => false,
+                'message' => 'E-Invoicing is not active for your account.',
+                'code' => 'service_not_active',
+                'service' => 'e_invoicing',
+            ])),
+        ]);
+
+        try {
+            $this->createEndpoint($http)->createNorwayEnrollment(
+                email: 'faktura@equinor.no',
+                orgNumber: '923609016',
+                companyName: 'EQUINOR ASA',
+                address: 'Forusbeen 50',
+                city: 'Stavanger',
+                postalcode: '4035',
+            );
+            self::fail('Expected HttpException was not thrown.');
+        } catch (HttpException $exception) {
+            self::assertSame(403, $exception->getStatusCode());
+            $body = json_decode((string) $exception->getResponseBody(), true);
+            self::assertSame('service_not_active', $body['code']);
+        }
+    }
+
+    public function testRegistryLookupByOrgNumberSendsNormalizedQueryAndParsesResults(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['results' => [self::registryCompanyPayload()]],
+            ])),
+        ]);
+
+        $results = $this->createEndpoint($http)->registryLookup('no', 'NO 923 609 016 MVA');
+
+        self::assertCount(1, $results);
+        self::assertInstanceOf(RegistryCompany::class, $results[0]);
+        self::assertSame('923609016', $results[0]->orgNumber);
+        self::assertSame('EQUINOR ASA', $results[0]->companyName);
+        self::assertTrue($results[0]->vatRegistered);
+        self::assertSame('NO923609016MVA', $results[0]->vatNumber);
+        self::assertTrue($results[0]->enterpriseRegister);
+        self::assertFalse($results[0]->isInsolvent());
+
+        $request = $http->requests[0];
+        self::assertSame('GET', $request->getMethod());
+        self::assertSame('/v1/compliance/registry-lookup', $request->getUri()->getPath());
+        self::assertSame('country=NO&q=923609016', $request->getUri()->getQuery());
+    }
+
+    public function testRegistryLookupByNameSendsQueryAsIs(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['results' => [
+                    self::registryCompanyPayload(),
+                    self::registryCompanyPayload(['org_number' => '974760673', 'company_name' => 'EQUINOR ENERGY AS']),
+                ]],
+            ])),
+        ]);
+
+        $results = $this->createEndpoint($http)->registryLookup('NO', 'Equinor');
+
+        self::assertCount(2, $results);
+        self::assertSame('974760673', $results[1]->orgNumber);
+        self::assertSame('country=NO&q=Equinor', $http->requests[0]->getUri()->getQuery());
+    }
+
+    public function testRegistryLookupRejectsInvalidOrgNumberBeforeHttp(): void
+    {
+        $http = new SequenceHttpClient([]);
+
+        try {
+            $this->createEndpoint($http)->registryLookup('NO', '923609017');
+            self::fail('Expected InvalidArgumentException was not thrown.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertStringContainsString('q must be a valid Norwegian organisation number', $exception->getMessage());
+        }
+
+        self::assertCount(0, $http->requests);
+    }
+
+    public function testRegistryLookupRejectsUnsupportedCountry(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('country must be one of "NO", got "FR".');
+
+        $endpoint->registryLookup('FR', '123456789');
+    }
+
+    public function testRegistryLookupNotFoundThrows404HttpException(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(404, ['Content-Type' => 'application/json'], '{"success":false,"message":"No company found for \"Nonexistent\"."}'),
+        ]);
+
+        try {
+            $this->createEndpoint($http)->registryLookup('NO', 'Nonexistent');
+            self::fail('Expected HttpException was not thrown.');
+        } catch (HttpException $exception) {
+            self::assertSame(404, $exception->getStatusCode());
+        }
+
+        self::assertCount(1, $http->requests, '404 is not retried');
+    }
+
+    public function testPeppolLookupReachableBuyer(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [
+                    'status' => 'reachable',
+                    'reachable' => true,
+                    'country' => 'NO',
+                    'scheme' => '0192',
+                    'id' => '923609016',
+                    'document_types' => ['xml.ubl.invoice.bis3', 'xml.ubl.credit_note.bis3'],
+                    'transport_type_code' => 'peppol',
+                    'checked_at' => '2026-09-25T10:00:00+00:00',
+                ],
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->peppolLookup('NO', '923 609 016');
+
+        self::assertInstanceOf(PeppolLookupResult::class, $result);
+        self::assertSame(PeppolLookupStatus::REACHABLE, $result->status);
+        self::assertTrue($result->status->isSuccess());
+        self::assertTrue($result->reachable);
+        self::assertSame(['xml.ubl.invoice.bis3', 'xml.ubl.credit_note.bis3'], $result->documentTypes);
+        self::assertSame('peppol', $result->transportTypeCode);
+
+        $request = $http->requests[0];
+        self::assertSame('GET', $request->getMethod());
+        self::assertSame('/v1/compliance/peppol-lookup', $request->getUri()->getPath());
+        self::assertSame('country=NO&id=923609016', $request->getUri()->getQuery(), 'scheme defaults server-side to 0192');
+    }
+
+    public function testPeppolLookupPendingHasNullReachable(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [
+                    'status' => 'pending',
+                    'reachable' => null,
+                    'country' => 'NO',
+                    'scheme' => '0192',
+                    'id' => '974760673',
+                    'document_types' => [],
+                    'transport_type_code' => null,
+                    'checked_at' => '2026-09-25T10:00:00+00:00',
+                ],
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->peppolLookup('NO', '974760673', scheme: '0192');
+
+        self::assertSame(PeppolLookupStatus::PENDING, $result->status);
+        self::assertFalse($result->status->isTerminal(), 'pending → poll again');
+        self::assertNull($result->reachable);
+        self::assertSame([], $result->documentTypes);
+        self::assertNull($result->transportTypeCode);
+        self::assertSame('country=NO&id=974760673&scheme=0192', $http->requests[0]->getUri()->getQuery());
+    }
+
+    public function testPeppolLookupRejectsInvalidOrgNumberBeforeHttp(): void
+    {
+        $http = new SequenceHttpClient([]);
+
+        try {
+            $this->createEndpoint($http)->peppolLookup('NO', '923609017');
+            self::fail('Expected InvalidArgumentException was not thrown.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertStringContainsString('id must be a valid Norwegian organisation number', $exception->getMessage());
+        }
+
+        self::assertCount(0, $http->requests);
+    }
+
+    public function testPeppolLookupRejectsMalformedScheme(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('scheme must be a 4-digit Peppol identifier scheme, e.g. "0192".');
+
+        $endpoint->peppolLookup('NO', 'abc', scheme: '19');
+    }
+
+    public function testCreateTransactionSendsNorwayInvoiceFields(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::norwayTransactionPayload(),
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $tx = $this->createEndpoint($http)->createTransaction(
+            enrollmentId: 21,
+            transactionType: ComplianceTransactionType::B2B_DOMESTIC_OUTBOUND,
+            invoiceNumber: 'NO-2026-0001',
+            invoiceDate: '2026-09-25',
+            subtotal: 1000,
+            total: 1250,
+            invoiceLines: [self::norwayLine()],
+            currency: 'NOK',
+            taxAmount: 250,
+            counterpartyName: 'EQUINOR ASA',
+            counterpartyCountry: 'NO',
+            counterpartyVatNumber: 'NO923609016MVA',
+            counterpartyRegisterId: '923 609 016',
+            counterpartyAddress: 'Forusbeen 50',
+            counterpartyCity: 'Stavanger',
+            counterpartyPostalcode: '4035',
+            counterpartyEmail: 'ap@equinor.no',
+            buyerReference: 'PO-4711',
+            extraInfo: 'Thank you for your business.',
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame('b2b_domestic_outbound', $payload['transaction_type']);
+        self::assertSame('923609016', $payload['counterparty_register_id'], 'org number is normalised');
+        self::assertSame('Forusbeen 50', $payload['counterparty_address']);
+        self::assertSame('Stavanger', $payload['counterparty_city']);
+        self::assertSame('4035', $payload['counterparty_postalcode']);
+        self::assertSame('ap@equinor.no', $payload['counterparty_email']);
+        self::assertSame('PO-4711', $payload['buyer_reference']);
+        self::assertSame('Thank you for your business.', $payload['extra_info']);
+        self::assertArrayNotHasKey('is_credit_note', $payload);
+        self::assertArrayNotHasKey('amended_number', $payload);
+
+        self::assertSame('923609016', $tx->counterpartyRegisterId);
+        self::assertSame('Forusbeen 50', $tx->counterpartyAddress);
+        self::assertSame('Stavanger', $tx->counterpartyCity);
+        self::assertSame('4035', $tx->counterpartyPostalcode);
+        self::assertSame('ap@equinor.no', $tx->counterpartyEmail);
+        self::assertSame('PO-4711', $tx->buyerReference);
+        self::assertSame(ComplianceDocumentType::INVOICE, $tx->documentType);
+        self::assertFalse($tx->isCreditNote());
+        self::assertSame('accepted', $tx->providerState);
+        self::assertCount(1, $tx->invoiceLines);
+        self::assertSame('Consulting', $tx->invoiceLines[0]['description']);
+    }
+
+    public function testCreateTransactionSendsCreditNoteReference(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::norwayTransactionPayload([
+                    'document_type' => 'credit_note',
+                    'amended_number' => 'NO-2026-0001',
+                    'amended_date' => '2026-09-25',
+                    'provider_state' => null,
+                ]),
+            ])),
+        ]);
+
+        $tx = $this->createEndpoint($http)->createTransaction(
+            enrollmentId: 21,
+            transactionType: 'b2b_domestic_outbound',
+            invoiceNumber: 'NO-CN-2026-0001',
+            invoiceDate: '2026-09-30',
+            subtotal: 1000,
+            total: 1250,
+            invoiceLines: [self::norwayLine()],
+            counterpartyName: 'EQUINOR ASA',
+            counterpartyRegisterId: '923609016',
+            isCreditNote: true,
+            amendedNumber: 'NO-2026-0001',
+            amendedDate: new DateTimeImmutable('2026-09-25'),
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertTrue($payload['is_credit_note']);
+        self::assertSame('NO-2026-0001', $payload['amended_number']);
+        self::assertSame('2026-09-25', $payload['amended_date']);
+
+        self::assertSame(ComplianceDocumentType::CREDIT_NOTE, $tx->documentType);
+        self::assertTrue($tx->isCreditNote());
+        self::assertSame('NO-2026-0001', $tx->amendedNumber);
+        self::assertSame('2026-09-25', $tx->amendedDate);
+        self::assertNull($tx->providerState);
+    }
+
+    public function testCreateTransactionRejectsInvalidCounterpartyOrgNumber(): void
+    {
+        $http = new SequenceHttpClient([]);
+
+        try {
+            $this->createEndpoint($http)->createTransaction(
+                enrollmentId: 21,
+                transactionType: 'b2b_domestic_outbound',
+                invoiceNumber: 'NO-2026-0001',
+                invoiceDate: '2026-09-25',
+                subtotal: 1000,
+                total: 1250,
+                invoiceLines: [self::norwayLine()],
+                counterpartyRegisterId: '923609017',
+            );
+            self::fail('Expected InvalidArgumentException was not thrown.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertStringContainsString('counterpartyRegisterId must be a valid Norwegian organisation number', $exception->getMessage());
+        }
+
+        self::assertCount(0, $http->requests);
+    }
+
+    public function testCreateTransactionRejectsOverlongBuyerReference(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('buyerReference must not exceed 100 characters.');
+
+        $endpoint->createTransaction(
+            enrollmentId: 21,
+            transactionType: 'b2b_domestic_outbound',
+            invoiceNumber: 'NO-2026-0001',
+            invoiceDate: '2026-09-25',
+            subtotal: 1000,
+            total: 1250,
+            invoiceLines: [self::norwayLine()],
+            buyerReference: str_repeat('x', 101),
+        );
+    }
+
+    public function testCreateTransactionRejectsMalformedAmendedDate(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Date string must be in Y-m-d format.');
+
+        $endpoint->createTransaction(
+            enrollmentId: 21,
+            transactionType: 'b2b_domestic_outbound',
+            invoiceNumber: 'NO-CN-2026-0001',
+            invoiceDate: '2026-09-25',
+            subtotal: 1000,
+            total: 1250,
+            invoiceLines: [self::norwayLine()],
+            isCreditNote: true,
+            amendedNumber: 'NO-2026-0001',
+            amendedDate: '25.09.2026',
+        );
+    }
+
+    public function testUpdateTransactionSendsOnlyProvidedInvoiceFields(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::norwayTransactionPayload(['buyer_reference' => 'PO-4712']),
+            ])),
+        ]);
+
+        $tx = $this->createEndpoint($http)->updateTransaction(
+            id: 88,
+            buyerReference: 'PO-4712',
+            isCreditNote: false,
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame(['buyer_reference' => 'PO-4712', 'is_credit_note' => false], $payload);
+        self::assertSame('PO-4712', $tx->buyerReference);
+    }
+
+    public function testListTransactionsFiltersByEnrollmentAndCountry(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [
+                    'data' => [self::norwayTransactionPayload()],
+                    'meta' => ['current_page' => 1, 'per_page' => 25, 'total' => 1, 'last_page' => 1],
+                ],
+            ])),
+        ]);
+
+        $page = $this->createEndpoint($http)->listTransactions(complianceEnrollmentId: 21, country: 'no');
+
+        self::assertCount(1, $page);
+        self::assertSame('923609016', $page->rows[0]->counterpartyRegisterId);
+        self::assertSame(
+            'compliance_enrollment_id=21&country=NO&page=1&per_page=25',
+            $http->requests[0]->getUri()->getQuery(),
+        );
+    }
+
+    public function testListTransactionsRejectsMalformedCountryFilter(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('country must be an ISO 3166-1 alpha-2 code (exactly 2 letters).');
+
+        $endpoint->listTransactions(country: 'NOR');
+    }
+
+    public function testRequestEReportingAccessSendsServiceAndCountries(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], '{"success":true}'),
+        ]);
+
+        $this->createEndpoint($http)->requestEReportingAccess(
+            message: 'We invoice Norwegian customers.',
+            service: ComplianceService::E_INVOICING,
+            countries: ['no', 'FR'],
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame([
+            'message' => 'We invoice Norwegian customers.',
+            'service' => 'e_invoicing',
+            'countries' => ['NO', 'FR'],
+        ], $payload);
+    }
+
+    public function testRequestEReportingAccessRejectsMalformedCountry(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('countries[1] must be an ISO 3166-1 alpha-2 code (exactly 2 letters).');
+
+        $endpoint->requestEReportingAccess(countries: ['NO', 'Norway']);
+    }
+
     /* ---------- access request ---------- */
 
     public function testRequestEReportingAccessPostsProvidedFieldsOnly(): void
@@ -1597,6 +2212,108 @@ final class EReportingEndpointTest extends TestCase
             'refused_at' => null,
             'created_at' => '2026-06-16T02:00:00+00:00',
             'updated_at' => '2026-06-16T04:00:00+00:00',
+        ], $overrides);
+    }
+
+    private static function norwayLine(): ComplianceInvoiceLine
+    {
+        return new ComplianceInvoiceLine(
+            description: 'Consulting',
+            quantity: 10,
+            price: 100,
+            taxes: [new ComplianceLineTax(name: 'MVA', percent: 25, category: 'S')],
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
+    private static function norwayEnrollmentPayload(array $overrides = []): array
+    {
+        return self::enrollmentPayload(array_merge([
+            'id' => 21,
+            'country' => 'no',
+            'regime' => 'peppol_bis3',
+            'service' => 'e_invoicing',
+            'tax_id' => 'NO923609016MVA',
+            'company_register_id' => '923609016',
+            'company_register_scheme' => '0192',
+            'regime_config' => ['vat_registered' => true, 'enterprise_register' => true, 'reception' => false],
+            'reporting_start_date' => null,
+            'notification_email' => 'faktura@equinor.no',
+        ], $overrides));
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
+    private static function norwayTransactionPayload(array $overrides = []): array
+    {
+        return self::transactionPayload(array_merge([
+            'id' => 88,
+            'compliance_enrollment_id' => 21,
+            'country' => 'no',
+            'regime' => 'peppol_bis3',
+            'transaction_type' => 'b2b_domestic_outbound',
+            'transaction_type_label' => 'B2B domestic outbound',
+            'state' => 'submitted',
+            'state_label' => 'Submitted',
+            'invoice_number' => 'NO-2026-0001',
+            'invoice_date' => '2026-09-25',
+            'currency' => 'NOK',
+            'subtotal' => '1000.0000',
+            'tax_amount' => '250.0000',
+            'total' => '1250.0000',
+            'counterparty_name' => 'EQUINOR ASA',
+            'counterparty_country' => 'NO',
+            'counterparty_vat_number' => 'NO923609016MVA',
+            'counterparty_register_id' => '923609016',
+            'counterparty_address' => 'Forusbeen 50',
+            'counterparty_city' => 'Stavanger',
+            'counterparty_postalcode' => '4035',
+            'counterparty_email' => 'ap@equinor.no',
+            'buyer_reference' => 'PO-4711',
+            'document_type' => 'invoice',
+            'amended_number' => null,
+            'amended_date' => null,
+            'provider_invoice_id' => '991122',
+            'provider_state' => 'accepted',
+            'provider_payload' => [
+                'invoice' => [
+                    'invoice_lines_attributes' => [
+                        [
+                            'description' => 'Consulting',
+                            'quantity' => 10,
+                            'price' => 100,
+                            'taxes_attributes' => [['name' => 'MVA', 'percent' => 25, 'category' => 'S']],
+                        ],
+                    ],
+                ],
+            ],
+        ], $overrides));
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
+    private static function registryCompanyPayload(array $overrides = []): array
+    {
+        return array_merge([
+            'org_number' => '923609016',
+            'company_name' => 'EQUINOR ASA',
+            'organisation_form' => 'ASA',
+            'vat_registered' => true,
+            'vat_number' => 'NO923609016MVA',
+            'enterprise_register' => true,
+            'bankrupt' => false,
+            'under_liquidation' => false,
+            'address' => 'Forusbeen 50',
+            'postalcode' => '4035',
+            'city' => 'STAVANGER',
+            'country' => 'NO',
         ], $overrides);
     }
 

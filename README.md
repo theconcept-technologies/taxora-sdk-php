@@ -380,7 +380,133 @@ $client->eReporting()->requestEReportingAccess(
     phone: '+33 1 23 45 67 89',
     message: 'We need Flux 10 e-reporting starting September.',
     language: 'fr',
+    service: 'e_reporting',                 // optional: e_reporting (default) | e_invoicing
+    countries: ['FR'],                      // optional: ISO alpha-2 codes you need
 );
+```
+
+### 🇳🇴 E-Invoicing Norway (EHF / Peppol)
+
+Compliance services are booked **per country**: each enrollment covers one
+country and one service — France offers e-reporting (and e-invoicing) via DGFiP
+Flux 10 (`regime: dgfip_flux10`), Norway offers e-invoicing via EHF 3.0 =
+Peppol BIS Billing 3.0 (`regime: peppol_bis3`). `$enrollment->service` tells you
+which service an enrollment books (`ComplianceService::E_REPORTING` /
+`E_INVOICING`). Billing is per country as well: Norway is charged a one-off setup
+fee when the country is activated plus a price per document sent.
+
+The company needs the e-invoicing service unlocked — otherwise enrolling fails
+with an `HttpException` (status `403`, body code `service_not_active`); use
+`requestEReportingAccess(service: 'e_invoicing', countries: ['NO'])` to ask for it.
+Norwegian organisation numbers are validated locally (9 digits, modulus-11 check
+digit) before any request; `Taxora\Sdk\Support\NorwegianOrgNumber` exposes the
+same helpers (`normalize()`, `isValid()`, `toVatNumber()` → `NO923609016MVA`).
+
+#### 1. Registry lookup → enrollment
+
+```php
+// Brønnøysund register lookup by org number (spaces / "NO…MVA" accepted → one
+// result) or by name (search). 404 = nothing found; rate limit 30/minute.
+$companies = $client->eReporting()->registryLookup('NO', '923 609 016');
+$company   = $companies[0];                  // RegistryCompany
+
+$enrollment = $client->eReporting()->createNorwayEnrollment(
+    email: 'faktura@example.no',             // notification e-mail
+    orgNumber: $company->orgNumber,          // also the Peppol id (scheme 0192)
+    companyName: $company->companyName ?? 'Example AS',
+    address: $company->address ?? 'Storgata 1',
+    city: $company->city ?? 'Oslo',
+    postalcode: $company->postalcode ?? '0155',
+    vatRegistered: $company->vatRegistered,  // MVA-registered (default true)
+    enterpriseRegister: $company->enterpriseRegister, // adds "Foretaksregisteret" to invoices
+    reception: false,                        // true = also receive e-invoices over Peppol
+);
+
+echo $enrollment->service?->value;           // e_invoicing
+echo $enrollment->regime;                    // peppol_bis3
+```
+
+#### 2. Can the buyer receive e-invoices? (Peppol lookup)
+
+```php
+use Taxora\Sdk\Enums\PeppolLookupStatus;
+
+$peppol = $client->eReporting()->peppolLookup('NO', '974760673'); // scheme defaults to 0192
+
+if ($peppol->status === PeppolLookupStatus::PENDING) {
+    sleep(3);                                 // the directory resolves asynchronously — ask again
+    $peppol = $client->eReporting()->peppolLookup('NO', '974760673');
+}
+
+if ($peppol->status->isSuccess()) {           // reachable: buyer is in ELMA → send EHF
+    print_r($peppol->documentTypes);          // e.g. xml.ubl.invoice.bis3, xml.ubl.credit_note.bis3
+}
+```
+
+#### 3. Send an invoice
+
+```php
+use Taxora\Sdk\ValueObjects\ComplianceInvoiceLine;
+use Taxora\Sdk\ValueObjects\ComplianceLineTax;
+
+$tx = $client->eReporting()->createTransaction(
+    enrollmentId: $enrollment->id,
+    transactionType: 'b2b_domestic_outbound',  // the only type for Norway
+    invoiceNumber: 'NO-2026-0001',
+    invoiceDate: '2026-10-01',
+    dueDate: '2026-10-31',
+    currency: 'NOK',
+    subtotal: '1000.00',
+    taxAmount: '250.00',
+    total: '1250.00',
+    invoiceLines: [
+        new ComplianceInvoiceLine(
+            description: 'Consulting',
+            quantity: 10,
+            price: 100,
+            // Norwegian rates: getVatRates('NO') — 25/15/12 % are category S; AE = reverse charge
+            taxes: [new ComplianceLineTax(name: 'MVA', percent: 25, category: 'S')],
+        ),
+    ],
+    counterpartyName: 'Buyer AS',             // required for Norway
+    counterpartyRegisterId: '974760673',      // buyer org number — required for Norway
+    counterpartyVatNumber: 'NO974760673MVA',  // when the buyer is MVA-registered
+    counterpartyAddress: 'Kirkegata 2',
+    counterpartyCity: 'Bergen',
+    counterpartyPostalcode: '5003',
+    counterpartyEmail: 'ap@buyer.no',
+    buyerReference: 'PO-4711',                // Peppol buyer reference (defaults to the org number)
+    extraInfo: 'Thank you for your business.', // max 1000 chars; mandatory notes are added server-side
+);
+
+echo $tx->state->value;                       // pending / submitted / error
+echo $tx->providerState;                      // delivery state: sent, accepted, refused, paid, …
+```
+
+#### 4. Send a credit note
+
+```php
+$credit = $client->eReporting()->createTransaction(
+    enrollmentId: $enrollment->id,
+    transactionType: 'b2b_domestic_outbound',
+    invoiceNumber: 'NO-CN-2026-0001',
+    invoiceDate: '2026-10-05',
+    currency: 'NOK',
+    subtotal: '1000.00',
+    taxAmount: '250.00',
+    total: '1250.00',
+    invoiceLines: [/* the credited lines */],
+    counterpartyName: 'Buyer AS',
+    counterpartyRegisterId: '974760673',
+    isCreditNote: true,
+    amendedNumber: 'NO-2026-0001',            // the corrected invoice — required for credit notes
+    amendedDate: '2026-10-01',
+);
+
+var_dump($credit->isCreditNote());            // true (documentType = ComplianceDocumentType::CREDIT_NOTE)
+
+// Only the Norwegian transactions of one enrollment:
+$page = $client->eReporting()->listTransactions(complianceEnrollmentId: $enrollment->id, country: 'NO');
 ```
 
 `company()->get()` returns the raw company payload. New company limit fields are exposed as `api_rate_limit` and `vat_rate_limit`. The legacy `rate_limit` field may still appear temporarily for backward compatibility, but it should be treated as deprecated.
@@ -433,6 +559,14 @@ Each endpoint handles:
 | `ScoreBreakdown`  | Scoring fragment with validation step name, score contribution, and metadata context for the decision     |
 | `VatCollection`   | Iterable list of `VatResource` objects                                                                    |
 | `Token`           | Auth token with expiry & type                                                                             |
+| `ComplianceEnrollment` | Compliance enrollment for one country + service (`service`, `regime`, `status`, provider account)    |
+| `ComplianceTransaction` | Recorded e-reporting / e-invoicing transaction incl. buyer register data, `documentType`, credit-note reference and `providerState` |
+| `ComplianceTaxReport` | DGFiP tax report outcome of a transaction ledger (France)                                             |
+| `SireneLookupResult` | French SIRENE company data (prefill for `createEnrollment()`)                                         |
+| `RegistryCompany` | Norwegian register (Brønnøysund) company data from `registryLookup()`                                     |
+| `PeppolLookupResult` | Peppol directory answer (`status` reachable / not_reachable / pending, supported document types)      |
+| `RevenueStatistics` | Aggregated turnover statistics over compliance transactions                                            |
+| `SmartEnrichmentJob` | Smart Enrichment (reverse VAT lookup) job with its results                                            |
 
 Example:
 
