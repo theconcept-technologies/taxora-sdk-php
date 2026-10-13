@@ -532,6 +532,44 @@ $client = TaxoraClientFactory::create(
 
 ---
 
+## 🔐 Webhook Signatures
+
+Taxora can sign every webhook request with HMAC-SHA256 (opt-in per endpoint: dashboard → **Developer → Webhooks**,
+or `POST /v1/webhooks/{id}/signing/enable`). Signed requests carry
+`Taxora-Signature: t=<unix>,v1=<hex>` and `Taxora-Webhook-Id: <delivery uuid>`.
+
+```php
+use Taxora\Sdk\Exceptions\WebhookSignatureVerificationException;
+use Taxora\Sdk\Webhooks\WebhookSignature;
+
+$rawBody = file_get_contents('php://input');   // Laravel: $request->getContent() — never re-encoded JSON
+
+try {
+    $event = WebhookSignature::constructEvent(
+        $rawBody,
+        $_SERVER['HTTP_TAXORA_SIGNATURE'] ?? null,  // Laravel: $request->header('Taxora-Signature')
+        getenv('TAXORA_WEBHOOK_SECRET'),
+        tolerance: 300,                             // seconds, default
+    );
+} catch (WebhookSignatureVerificationException $e) {
+    http_response_code(400);                       // $e->getReason(): 'no_matching_signature', 'timestamp_outside_tolerance', …
+    exit;
+}
+
+if ($event['event'] === 'vat.validated') {
+    $vatUid = $event['data']['object']['vat_uid'];
+}
+http_response_code(200);
+```
+
+- `WebhookSignature::verify($rawBody, $header, $secret)` only checks (constant-time `hash_equals`, replay window).
+- During a secret rotation Taxora sends one `v1=` per live secret — any match is accepted. `$secret` may also be an
+  array to accept old and new secret on your side.
+- `WebhookSignature::generateHeader($rawBody, $secret)` builds a valid header for testing your own handler.
+- Dedupe on `$event['id']` (= `Taxora-Webhook-Id`), which stays the same across retries.
+
+---
+
 ## 🧩 Architecture
 
 The SDK follows clean separation of concerns:
