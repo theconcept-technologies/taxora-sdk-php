@@ -40,6 +40,14 @@ final readonly class SmartEnrichmentResource
          * @var array<string,mixed>|null
          */
         public ?array $addressQuality = null,
+        /**
+         * Only on `not_found`: VAT numbers the research DID find but the official check threw
+         * out — e.g. one the tax authority reports as invalid. Lets you tell "found one, it is
+         * invalid" apart from "found nothing". Empty for every other status.
+         *
+         * @var list<SmartEnrichmentRejectedCandidate>
+         */
+        public array $rejectedCandidates = [],
     ) {
     }
 
@@ -60,7 +68,32 @@ final readonly class SmartEnrichmentResource
                 ? array_values(array_filter($data['providerVerdicts'], 'is_array'))
                 : [],
             addressQuality: is_array($data['addressQuality'] ?? null) ? $data['addressQuality'] : null,
+            rejectedCandidates: self::rejectedCandidatesFrom($data['rejectedCandidates'] ?? null),
         );
+    }
+
+    /** True when a VAT number was found but rejected by the official check. */
+    public function hasRejectedCandidates(): bool
+    {
+        return $this->rejectedCandidates !== [];
+    }
+
+    /** @return list<SmartEnrichmentRejectedCandidate> */
+    private static function rejectedCandidatesFrom(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $candidates = [];
+        foreach ($value as $entry) {
+            $candidate = is_array($entry) ? SmartEnrichmentRejectedCandidate::fromArray($entry) : null;
+            if ($candidate !== null) {
+                $candidates[] = $candidate;
+            }
+        }
+
+        return $candidates;
     }
 
     /** @return array<string,mixed> */
@@ -78,6 +111,10 @@ final readonly class SmartEnrichmentResource
             'mode' => $this->mode?->value,
             'providerVerdicts' => $this->providerVerdicts,
             'addressQuality' => $this->addressQuality,
+            'rejectedCandidates' => array_map(
+                static fn (SmartEnrichmentRejectedCandidate $candidate): array => $candidate->toArray(),
+                $this->rejectedCandidates,
+            ),
         ];
     }
 }

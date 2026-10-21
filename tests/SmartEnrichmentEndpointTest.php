@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Taxora\Sdk\Endpoints\SmartEnrichmentEndpoint;
 use Taxora\Sdk\Enums\ApiVersion;
 use Taxora\Sdk\Enums\SmartEnrichmentMode;
+use Taxora\Sdk\Enums\SmartEnrichmentRejectionReason;
 use Taxora\Sdk\Enums\SmartEnrichmentStatus;
 use Taxora\Sdk\Exceptions\HttpException;
 use Taxora\Sdk\Exceptions\TimeoutException;
@@ -921,6 +922,84 @@ final class SmartEnrichmentEndpointTest extends TestCase
         self::assertNull($result->mode);
         self::assertSame([], $result->providerVerdicts);
         self::assertNull($result->addressQuality);
+    }
+
+    public function testNotFoundResultExposesRejectedCandidates(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-rejected',
+                'status' => 'not_found',
+                'vatNumber' => null,
+                'country' => 'DE',
+                'rejectedCandidates' => [
+                    ['vatNumber' => 'DE176664507', 'reason' => 'vat_invalid'],
+                    ['vatNumber' => 'DE811704788', 'reason' => 'name_mismatch'],
+                ],
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Ambulance Köpke GmbH', 'DE')->result();
+
+        self::assertNotNull($result);
+        self::assertSame(SmartEnrichmentStatus::NOT_FOUND, $result->status);
+        self::assertNull($result->vatNumber);
+        self::assertTrue($result->hasRejectedCandidates());
+        self::assertCount(2, $result->rejectedCandidates);
+        self::assertSame('DE176664507', $result->rejectedCandidates[0]->vatNumber);
+        self::assertSame(SmartEnrichmentRejectionReason::VAT_INVALID, $result->rejectedCandidates[0]->reason);
+        self::assertSame(SmartEnrichmentRejectionReason::NAME_MISMATCH, $result->rejectedCandidates[1]->reason);
+        self::assertSame(
+            [
+                ['vatNumber' => 'DE176664507', 'reason' => 'vat_invalid'],
+                ['vatNumber' => 'DE811704788', 'reason' => 'name_mismatch'],
+            ],
+            $result->toArray()['rejectedCandidates'],
+        );
+    }
+
+    public function testRejectedCandidatesAreParsedTolerantly(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-rejected-odd',
+                'status' => 'not_found',
+                'rejectedCandidates' => [
+                    ['vatNumber' => 'ATU12345678', 'reason' => 'some_future_reason'],
+                    ['vatNumber' => 'ATU87654321'],
+                    ['reason' => 'vat_invalid'],
+                    ['vatNumber' => '   ', 'reason' => 'vat_invalid'],
+                    'not-an-object',
+                ],
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Example GmbH', 'AT')->result();
+
+        self::assertNotNull($result);
+        // Entries without a VAT number carry nothing to report and are dropped.
+        self::assertCount(2, $result->rejectedCandidates);
+        // An unknown or missing reason must not break parsing for older SDK versions.
+        self::assertSame(SmartEnrichmentRejectionReason::UNKNOWN, $result->rejectedCandidates[0]->reason);
+        self::assertSame(SmartEnrichmentRejectionReason::UNKNOWN, $result->rejectedCandidates[1]->reason);
+    }
+
+    public function testRejectedCandidatesDefaultToEmpty(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-none',
+                'status' => 'not_found',
+                'rejectedCandidates' => null,
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Example GmbH', 'DE')->result();
+
+        self::assertNotNull($result);
+        self::assertSame([], $result->rejectedCandidates);
+        self::assertFalse($result->hasRejectedCandidates());
+        self::assertSame([], $result->toArray()['rejectedCandidates']);
     }
 
     private function createEndpoint(

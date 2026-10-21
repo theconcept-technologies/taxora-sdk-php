@@ -144,6 +144,13 @@ if ($quality !== null && $quality['warnings'] !== []) {
     echo implode(', ', $quality['warnings']) . ' → ' . ($quality['derivedPlace'] ?? '?') . PHP_EOL;
 }
 
+// `not_found` doesn't always mean nothing turned up. When the research found a VAT number but
+// the official check threw it out (e.g. the tax authority reports it as invalid), the number
+// and the reason are in `rejectedCandidates` — no need to re-check it yourself.
+foreach ($job->result()?->rejectedCandidates ?? [] as $candidate) {
+    echo $candidate->vatNumber . ': ' . $candidate->reason->value . PHP_EOL; // e.g. vat_invalid
+}
+
 // Bulk lookup (always async → webhook + polling). The batch-level mode applies to every
 // row; a row carrying its own 'mode' overrides it, so you can pay for `complex` on just
 // the rows that need it.
