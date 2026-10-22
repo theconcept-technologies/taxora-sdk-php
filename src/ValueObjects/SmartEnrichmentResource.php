@@ -48,6 +48,17 @@ final readonly class SmartEnrichmentResource
          * @var list<SmartEnrichmentRejectedCandidate>
          */
         public array $rejectedCandidates = [],
+        /**
+         * Only on `found`: the web page the VAT number was read from — usually the company's own
+         * Impressum / legal notice. Null when it came from Taxora's own data or a register.
+         */
+        public ?string $sourceUrl = null,
+        /**
+         * Only on `found`: the PERSON the tax authority has the VAT ID under, when that is not the
+         * trading name — typical for a German sole proprietorship (e.K.). `matchedCompanyName`
+         * stays the trading name.
+         */
+        public ?string $registeredOwner = null,
     ) {
     }
 
@@ -69,7 +80,27 @@ final readonly class SmartEnrichmentResource
                 : [],
             addressQuality: is_array($data['addressQuality'] ?? null) ? $data['addressQuality'] : null,
             rejectedCandidates: self::rejectedCandidatesFrom($data['rejectedCandidates'] ?? null),
+            sourceUrl: self::webUrl($data['sourceUrl'] ?? null),
+            registeredOwner: self::nonEmptyString($data['registeredOwner'] ?? null),
         );
+    }
+
+    /** Only an http(s) address — anything else in the field is not a link worth following. */
+    private static function webUrl(mixed $value): ?string
+    {
+        $url = self::nonEmptyString($value);
+
+        return $url !== null && preg_match('#^https?://\S+$#i', $url) === 1 ? $url : null;
+    }
+
+    private static function nonEmptyString(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+        $trimmed = trim($value);
+
+        return $trimmed === '' ? null : $trimmed;
     }
 
     /** True when a VAT number was found but rejected by the official check. */
@@ -115,6 +146,8 @@ final readonly class SmartEnrichmentResource
                 static fn (SmartEnrichmentRejectedCandidate $candidate): array => $candidate->toArray(),
                 $this->rejectedCandidates,
             ),
+            'sourceUrl' => $this->sourceUrl,
+            'registeredOwner' => $this->registeredOwner,
         ];
     }
 }

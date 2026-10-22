@@ -984,6 +984,49 @@ final class SmartEnrichmentEndpointTest extends TestCase
         self::assertSame(SmartEnrichmentRejectionReason::UNKNOWN, $result->rejectedCandidates[1]->reason);
     }
 
+    public function testFoundResultExposesSourceUrlAndRegisteredOwner(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-owner',
+                'status' => 'found',
+                'vatNumber' => 'DE313050507',
+                'matchedCompanyName' => 'Abschleppdienst Kawelke e.K.',
+                'country' => 'DE',
+                'sourceUrl' => 'https://kawelke-abschlepp.de/Impressum',
+                'registeredOwner' => 'Kevin Seibel',
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Abschleppdienst Kawelke e.K.', 'DE')->result();
+
+        self::assertNotNull($result);
+        self::assertSame('https://kawelke-abschlepp.de/Impressum', $result->sourceUrl);
+        self::assertSame('Kevin Seibel', $result->registeredOwner);
+        self::assertSame('Abschleppdienst Kawelke e.K.', $result->matchedCompanyName);
+        self::assertSame('https://kawelke-abschlepp.de/Impressum', $result->toArray()['sourceUrl']);
+        self::assertSame('Kevin Seibel', $result->toArray()['registeredOwner']);
+    }
+
+    public function testSourceUrlOnlyAcceptsWebAddresses(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-bad-url',
+                'status' => 'found',
+                'vatNumber' => 'DE313050507',
+                'sourceUrl' => 'javascript:alert(1)',
+                'registeredOwner' => '   ',
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Example GmbH', 'DE')->result();
+
+        self::assertNotNull($result);
+        self::assertNull($result->sourceUrl);
+        self::assertNull($result->registeredOwner);
+    }
+
     public function testRejectedCandidatesDefaultToEmpty(): void
     {
         $http = new SequenceHttpClient([
