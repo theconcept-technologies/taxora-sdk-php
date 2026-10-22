@@ -148,6 +148,7 @@ if ($quality !== null && $quality['warnings'] !== []) {
 // from (usually the Impressum). `registeredOwner` is set when the tax authority has the VAT ID
 // under a person rather than the trading name — a German e.K. — and confirmed it for them.
 echo $result?->sourceUrl ?? '—';        // e.g. https://example.de/impressum
+echo implode(', ', $result?->sourceUrls ?? []); // every page it was found on, main one first
 echo $result?->registeredOwner ?? '—';  // e.g. Kevin Seibel
 
 // `not_found` doesn't always mean nothing turned up. When the research found a VAT number but

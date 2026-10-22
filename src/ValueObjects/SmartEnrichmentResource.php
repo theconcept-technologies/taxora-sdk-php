@@ -59,6 +59,13 @@ final readonly class SmartEnrichmentResource
          * stays the trading name.
          */
         public ?string $registeredOwner = null,
+        /**
+         * Only on `found`: every page the VAT number was read from, `sourceUrl` first — each
+         * research pass that found the same number contributes its page. At most 5.
+         *
+         * @var list<string>
+         */
+        public array $sourceUrls = [],
     ) {
     }
 
@@ -82,6 +89,7 @@ final readonly class SmartEnrichmentResource
             rejectedCandidates: self::rejectedCandidatesFrom($data['rejectedCandidates'] ?? null),
             sourceUrl: self::webUrl($data['sourceUrl'] ?? null),
             registeredOwner: self::nonEmptyString($data['registeredOwner'] ?? null),
+            sourceUrls: self::webUrls($data['sourceUrls'] ?? null),
         );
     }
 
@@ -91,6 +99,24 @@ final readonly class SmartEnrichmentResource
         $url = self::nonEmptyString($value);
 
         return $url !== null && preg_match('#^https?://\S+$#i', $url) === 1 ? $url : null;
+    }
+
+    /** @return list<string> */
+    private static function webUrls(mixed $value): array
+    {
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $urls = [];
+        foreach ($value as $entry) {
+            $url = self::webUrl($entry);
+            if ($url !== null && !in_array($url, $urls, true)) {
+                $urls[] = $url;
+            }
+        }
+
+        return $urls;
     }
 
     private static function nonEmptyString(mixed $value): ?string
@@ -148,6 +174,7 @@ final readonly class SmartEnrichmentResource
             ),
             'sourceUrl' => $this->sourceUrl,
             'registeredOwner' => $this->registeredOwner,
+            'sourceUrls' => $this->sourceUrls,
         ];
     }
 }

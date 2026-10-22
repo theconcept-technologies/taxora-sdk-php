@@ -994,6 +994,7 @@ final class SmartEnrichmentEndpointTest extends TestCase
                 'matchedCompanyName' => 'Abschleppdienst Kawelke e.K.',
                 'country' => 'DE',
                 'sourceUrl' => 'https://kawelke-abschlepp.de/Impressum',
+                'sourceUrls' => ['https://kawelke-abschlepp.de/Impressum', 'https://www.northdata.de/Kawelke'],
                 'registeredOwner' => 'Kevin Seibel',
             ])),
         ]);
@@ -1006,6 +1007,8 @@ final class SmartEnrichmentEndpointTest extends TestCase
         self::assertSame('Abschleppdienst Kawelke e.K.', $result->matchedCompanyName);
         self::assertSame('https://kawelke-abschlepp.de/Impressum', $result->toArray()['sourceUrl']);
         self::assertSame('Kevin Seibel', $result->toArray()['registeredOwner']);
+        self::assertSame(['https://kawelke-abschlepp.de/Impressum', 'https://www.northdata.de/Kawelke'], $result->sourceUrls);
+        self::assertSame($result->sourceUrls, $result->toArray()['sourceUrls']);
     }
 
     public function testSourceUrlOnlyAcceptsWebAddresses(): void
@@ -1016,6 +1019,7 @@ final class SmartEnrichmentEndpointTest extends TestCase
                 'status' => 'found',
                 'vatNumber' => 'DE313050507',
                 'sourceUrl' => 'javascript:alert(1)',
+                'sourceUrls' => ['javascript:alert(1)', 'https://ok.example', 'https://ok.example', 42, null],
                 'registeredOwner' => '   ',
             ])),
         ]);
@@ -1025,6 +1029,7 @@ final class SmartEnrichmentEndpointTest extends TestCase
         self::assertNotNull($result);
         self::assertNull($result->sourceUrl);
         self::assertNull($result->registeredOwner);
+        self::assertSame(['https://ok.example'], $result->sourceUrls);
     }
 
     public function testRejectedCandidatesDefaultToEmpty(): void
