@@ -66,7 +66,35 @@ final readonly class SmartEnrichmentResource
          * @var list<string>
          */
         public array $sourceUrls = [],
+        /**
+         * A domestic tax number (e.g. a German Steuernummer, digits only) the company's own page
+         * shows INSTEAD of a VAT ID — often under the VAT ID heading by mistake. Not a VAT ID.
+         */
+        public ?string $taxNumber = null,
+        /** Only on `found`: the tax authority's verdict on the number; null when no official check ran. */
+        public ?bool $vatValid = null,
+        /** Only on `found`: 0–100, the requested name against the register's; null when no name was disclosed. */
+        public ?float $aiScore = null,
+        /**
+         * Only on `found`: 'ok' (name matches the register) or 'mismatch' (it does not — another
+         * company, unless $registeredOwner is set: then update your record). Null when no name was disclosed.
+         */
+        public ?string $nameMatch = null,
+        /** Only on `found`: the name the register has the number under. */
+        public ?string $officialName = null,
+        /**
+         * Only on `found`: the registered address, field by field (street, postal_code, city, country).
+         *
+         * @var array<string,string>|null
+         */
+        public ?array $officialAddress = null,
     ) {
+    }
+
+    /** True when the register knows the number under a different name than the one requested. */
+    public function nameMismatch(): bool
+    {
+        return $this->nameMatch === 'mismatch';
     }
 
     /** @param array<string,mixed> $data */
@@ -90,7 +118,31 @@ final readonly class SmartEnrichmentResource
             sourceUrl: self::webUrl($data['sourceUrl'] ?? null),
             registeredOwner: self::nonEmptyString($data['registeredOwner'] ?? null),
             sourceUrls: self::webUrls($data['sourceUrls'] ?? null),
+            taxNumber: self::nonEmptyString($data['taxNumber'] ?? null),
+            vatValid: is_bool($data['vatValid'] ?? null) ? $data['vatValid'] : null,
+            aiScore: is_numeric($data['aiScore'] ?? null) ? (float) $data['aiScore'] : null,
+            nameMatch: in_array($data['nameMatch'] ?? null, ['ok', 'mismatch'], true) ? $data['nameMatch'] : null,
+            officialName: self::nonEmptyString($data['officialName'] ?? null),
+            officialAddress: self::addressFrom($data['officialAddress'] ?? null),
         );
+    }
+
+    /** @return array<string,string>|null only the known address parts, as strings */
+    private static function addressFrom(mixed $value): ?array
+    {
+        if (!is_array($value)) {
+            return null;
+        }
+
+        $address = [];
+        foreach (['street', 'postal_code', 'city', 'country'] as $key) {
+            $part = self::nonEmptyString($value[$key] ?? null);
+            if ($part !== null) {
+                $address[$key] = $part;
+            }
+        }
+
+        return $address === [] ? null : $address;
     }
 
     /** Only an http(s) address — anything else in the field is not a link worth following. */
@@ -175,6 +227,12 @@ final readonly class SmartEnrichmentResource
             'sourceUrl' => $this->sourceUrl,
             'registeredOwner' => $this->registeredOwner,
             'sourceUrls' => $this->sourceUrls,
+            'taxNumber' => $this->taxNumber,
+            'vatValid' => $this->vatValid,
+            'aiScore' => $this->aiScore,
+            'nameMatch' => $this->nameMatch,
+            'officialName' => $this->officialName,
+            'officialAddress' => $this->officialAddress,
         ];
     }
 }

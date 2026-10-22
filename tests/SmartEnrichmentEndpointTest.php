@@ -1032,6 +1032,59 @@ final class SmartEnrichmentEndpointTest extends TestCase
         self::assertSame(['https://ok.example'], $result->sourceUrls);
     }
 
+    public function testFoundResultExposesTheOfficialVatCheck(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-check',
+                'status' => 'found',
+                'vatNumber' => 'DE313050507',
+                'matchedCompanyName' => 'Abschleppdienst Kawelke e.K.',
+                'registeredOwner' => 'Kevin Seibel',
+                'vatValid' => true,
+                'aiScore' => 18,
+                'nameMatch' => 'mismatch',
+                'officialName' => 'Seibel Kevin',
+                'officialAddress' => ['street' => 'Beethovenstr. 2', 'postal_code' => '67258', 'city' => 'Heßheim', 'country' => 'DE', 'junk' => 'x'],
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Abschleppdienst Kawelke e.K.', 'DE')->result();
+
+        self::assertNotNull($result);
+        self::assertTrue($result->vatValid);
+        self::assertSame(18.0, $result->aiScore);
+        self::assertTrue($result->nameMismatch());
+        self::assertSame('Seibel Kevin', $result->officialName);
+        self::assertSame(['street' => 'Beethovenstr. 2', 'postal_code' => '67258', 'city' => 'Heßheim', 'country' => 'DE'], $result->officialAddress);
+        self::assertSame('mismatch', $result->toArray()['nameMatch']);
+    }
+
+    public function testNotFoundResultExposesATaxNumberInsteadOfAVatId(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-tax',
+                'status' => 'not_found',
+                'vatNumber' => null,
+                'taxNumber' => '21815953301',
+                'vatValid' => null,
+                'nameMatch' => 'something-else',
+                'officialAddress' => 'not-an-object',
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Fritz Schiller Fußbodenverlegung OHG', 'DE')->result();
+
+        self::assertNotNull($result);
+        self::assertSame('21815953301', $result->taxNumber);
+        self::assertNull($result->vatNumber);
+        self::assertNull($result->vatValid);
+        self::assertNull($result->nameMatch, 'unknown values are dropped, not passed through');
+        self::assertFalse($result->nameMismatch());
+        self::assertNull($result->officialAddress);
+    }
+
     public function testRejectedCandidatesDefaultToEmpty(): void
     {
         $http = new SequenceHttpClient([
