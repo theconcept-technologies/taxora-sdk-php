@@ -67,8 +67,12 @@ final readonly class SmartEnrichmentResource
          */
         public array $sourceUrls = [],
         /**
-         * A domestic tax number (e.g. a German Steuernummer, digits only) the company's own page
-         * shows INSTEAD of a VAT ID — often under the VAT ID heading by mistake. Not a VAT ID.
+         * The company's LOCAL tax / business number, national notation without spaces — what
+         * domestic e-invoicing asks for. On `found` it is read off the confirmed VAT ID where that
+         * country's VAT ID contains it ($taxNumberSource 'vat_id': FR SIREN, IT Partita IVA, ES NIF,
+         * PL NIP, BE enterprise number, DK CVR, PT, RO, CZ IČO, SK DIČ, SE/NO orgnr, FI Y-tunnus,
+         * SI, HR OIB, BG EIK, GR AFM). Otherwise a domestic number the company itself published
+         * ('company_website', e.g. a DE/AT Steuernummer) — that one is not a VAT ID.
          */
         public ?string $taxNumber = null,
         /** Only on `found`: the tax authority's verdict on the number; null when no official check ran. */
@@ -88,6 +92,15 @@ final readonly class SmartEnrichmentResource
          * @var array<string,string>|null
          */
         public ?array $officialAddress = null,
+        /** What $taxNumber is, e.g. 'pl_nip', 'fr_siren', 'de_steuernummer'. Null when there is none. */
+        public ?string $taxNumberType = null,
+        /** The number's name in its country (SIREN, NIP, Steuernummer …), for display. */
+        public ?string $taxNumberLabel = null,
+        /**
+         * Where $taxNumber comes from: 'vat_id' (read off the VAT ID the tax authority confirmed —
+         * exact) or 'company_website' (published by the company itself, not officially confirmable).
+         */
+        public ?string $taxNumberSource = null,
     ) {
     }
 
@@ -124,6 +137,11 @@ final readonly class SmartEnrichmentResource
             nameMatch: in_array($data['nameMatch'] ?? null, ['ok', 'mismatch'], true) ? $data['nameMatch'] : null,
             officialName: self::nonEmptyString($data['officialName'] ?? null),
             officialAddress: self::addressFrom($data['officialAddress'] ?? null),
+            taxNumberType: self::nonEmptyString($data['taxNumberType'] ?? null),
+            taxNumberLabel: self::nonEmptyString($data['taxNumberLabel'] ?? null),
+            taxNumberSource: in_array($data['taxNumberSource'] ?? null, ['vat_id', 'company_website'], true)
+                ? $data['taxNumberSource']
+                : null,
         );
     }
 
@@ -233,6 +251,9 @@ final readonly class SmartEnrichmentResource
             'nameMatch' => $this->nameMatch,
             'officialName' => $this->officialName,
             'officialAddress' => $this->officialAddress,
+            'taxNumberType' => $this->taxNumberType,
+            'taxNumberLabel' => $this->taxNumberLabel,
+            'taxNumberSource' => $this->taxNumberSource,
         ];
     }
 }

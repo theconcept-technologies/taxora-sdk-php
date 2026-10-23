@@ -1068,6 +1068,9 @@ final class SmartEnrichmentEndpointTest extends TestCase
                 'status' => 'not_found',
                 'vatNumber' => null,
                 'taxNumber' => '21815953301',
+                'taxNumberType' => 'de_steuernummer',
+                'taxNumberLabel' => 'Steuernummer',
+                'taxNumberSource' => 'company_website',
                 'vatValid' => null,
                 'nameMatch' => 'something-else',
                 'officialAddress' => 'not-an-object',
@@ -1078,11 +1081,61 @@ final class SmartEnrichmentEndpointTest extends TestCase
 
         self::assertNotNull($result);
         self::assertSame('21815953301', $result->taxNumber);
+        self::assertSame('de_steuernummer', $result->taxNumberType);
+        self::assertSame('company_website', $result->taxNumberSource);
         self::assertNull($result->vatNumber);
         self::assertNull($result->vatValid);
         self::assertNull($result->nameMatch, 'unknown values are dropped, not passed through');
         self::assertFalse($result->nameMismatch());
         self::assertNull($result->officialAddress);
+    }
+
+    public function testFoundResultExposesTheLocalTaxNumberReadOffTheVatId(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-local',
+                'status' => 'found',
+                'vatNumber' => 'PL5260250995',
+                'taxNumber' => '5260250995',
+                'taxNumberType' => 'pl_nip',
+                'taxNumberLabel' => ' NIP ',
+                'taxNumberSource' => 'vat_id',
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Orlen S.A.', 'PL')->result();
+
+        self::assertNotNull($result);
+        self::assertSame('5260250995', $result->taxNumber);
+        self::assertSame('pl_nip', $result->taxNumberType);
+        self::assertSame('NIP', $result->taxNumberLabel);
+        self::assertSame('vat_id', $result->taxNumberSource);
+        self::assertSame('pl_nip', $result->toArray()['taxNumberType']);
+        self::assertSame('NIP', $result->toArray()['taxNumberLabel']);
+        self::assertSame('vat_id', $result->toArray()['taxNumberSource']);
+    }
+
+    public function testLocalTaxNumberFieldsDropUnknownOrEmptyValues(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-local-none',
+                'status' => 'not_found',
+                'taxNumber' => null,
+                'taxNumberType' => '',
+                'taxNumberLabel' => 42,
+                'taxNumberSource' => 'somewhere-else',
+            ])),
+        ]);
+
+        $result = $this->createEndpoint($http)->lookup('Unknown GmbH', 'DE')->result();
+
+        self::assertNotNull($result);
+        self::assertNull($result->taxNumber);
+        self::assertNull($result->taxNumberType);
+        self::assertNull($result->taxNumberLabel);
+        self::assertNull($result->taxNumberSource, 'unknown sources are dropped, not passed through');
     }
 
     public function testRejectedCandidatesDefaultToEmpty(): void
