@@ -22,6 +22,8 @@ use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
 use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
+use Taxora\Sdk\ValueObjects\LocalTaxNumberRow;
+use Taxora\Sdk\ValueObjects\LocalTaxNumberSummary;
 use Taxora\Sdk\ValueObjects\VatValidationAddressInput;
 use Taxora\Sdk\ValueObjects\VatResource;
 use Taxora\Sdk\ValueObjects\VatCertificateExport;
@@ -203,6 +205,129 @@ final class VatEndpoint
         return $this->withRetries('VAT export download', fn () => $this->binaryGet($uri));
     }
 
+    /**
+     * Local tax numbers report as raw CSV (UTF-8 with BOM, comma-separated): every company checked —
+     * single and bulk VAT checks and Smart Enrichment lookups — once, with its local tax number
+     * (taxNumber, taxNumberName, taxNumberSource). All filters are optional: $dateFrom/$dateTo (Y-m-d),
+     * $countries (ISO-2) and $onlyWithTaxNumber.
+     *
+     * Digit-only taxNumber cells carry a leading TAB so Excel keeps them as text; localTaxNumbers()
+     * strips it for you.
+     *
+     * @param list<string>|null $countries
+     * @return string raw CSV bytes
+     */
+    public function localTaxNumbersCsv(
+        DateTimeInterface|string|null $dateFrom = null,
+        DateTimeInterface|string|null $dateTo = null,
+        ?array $countries = null,
+        ?bool $onlyWithTaxNumber = null
+    ): string {
+        $query = $this->localTaxNumbersQuery($dateFrom, $dateTo, $countries);
+        if ($onlyWithTaxNumber !== null) {
+            $query[] = 'only_with_tax_number=' . ($onlyWithTaxNumber ? '1' : '0');
+        }
+        $uri = $this->uri('/reports/local-tax-numbers' . ($query === [] ? '' : '?' . implode('&', $query)));
+
+        return $this->withRetries('Local tax numbers report', fn () => $this->csvGet($uri));
+    }
+
+    /**
+     * The local tax numbers report, parsed: one row per company (same filters as localTaxNumbersCsv()).
+     *
+     * @param list<string>|null $countries
+     * @return list<LocalTaxNumberRow>
+     */
+    public function localTaxNumbers(
+        DateTimeInterface|string|null $dateFrom = null,
+        DateTimeInterface|string|null $dateTo = null,
+        ?array $countries = null,
+        ?bool $onlyWithTaxNumber = null
+    ): array {
+        return self::parseLocalTaxNumbersCsv($this->localTaxNumbersCsv($dateFrom, $dateTo, $countries, $onlyWithTaxNumber));
+    }
+
+    /**
+     * How many companies the report would list for the filters, and how many have a tax number.
+     *
+     * @param list<string>|null $countries
+     */
+    public function localTaxNumbersSummary(
+        DateTimeInterface|string|null $dateFrom = null,
+        DateTimeInterface|string|null $dateTo = null,
+        ?array $countries = null
+    ): LocalTaxNumberSummary {
+        $query = $this->localTaxNumbersQuery($dateFrom, $dateTo, $countries);
+        $uri = $this->uri('/reports/local-tax-numbers/summary' . ($query === [] ? '' : '?' . implode('&', $query)));
+        $payload = $this->withRetries('Local tax numbers summary', fn () => $this->jsonGet($uri));
+
+        return LocalTaxNumberSummary::fromArray($this->extractData($payload));
+    }
+
+    /**
+     * Parses a local tax numbers CSV (as returned by localTaxNumbersCsv()) into rows: BOM dropped,
+     * cells trimmed (incl. the Excel TAB guard), empty cells null.
+     *
+     * @return list<LocalTaxNumberRow>
+     */
+    public static function parseLocalTaxNumbersCsv(string $csv): array
+    {
+        if (str_starts_with($csv, "\xEF\xBB\xBF")) {
+            $csv = substr($csv, 3);
+        }
+
+        $handle = fopen('php://memory', 'r+b');
+        if ($handle === false) {
+            return [];
+        }
+        fwrite($handle, $csv);
+        rewind($handle);
+
+        $rows = [];
+        $header = null;
+        while (($cells = fgetcsv($handle, null, ',', '"', '')) !== false) {
+            if ($cells === [null]) {
+                continue; // blank line
+            }
+            /** @var list<string|null> $cells */
+            if ($header === null) {
+                $header = array_map(static fn (?string $name): string => trim((string) $name), $cells);
+                continue;
+            }
+            $row = [];
+            foreach ($header as $i => $name) {
+                $row[$name] = $cells[$i] ?? null;
+            }
+            $rows[] = LocalTaxNumberRow::fromArray($row);
+        }
+        fclose($handle);
+
+        return $rows;
+    }
+
+    /**
+     * @param list<string>|null $countries
+     * @return list<string> encoded query pairs shared by the report and its summary
+     */
+    private function localTaxNumbersQuery(
+        DateTimeInterface|string|null $dateFrom,
+        DateTimeInterface|string|null $dateTo,
+        ?array $countries
+    ): array {
+        $pairs = [];
+        if ($dateFrom !== null) {
+            $pairs[] = 'date_from=' . rawurlencode($this->formatDate($dateFrom));
+        }
+        if ($dateTo !== null) {
+            $pairs[] = 'date_to=' . rawurlencode($this->formatDate($dateTo));
+        }
+        foreach ($countries ?? [] as $country) {
+            $pairs[] = rawurlencode('countries[]') . '=' . rawurlencode(strtoupper(trim($country)));
+        }
+
+        return $pairs;
+    }
+
     /* ---------- internals (shared) ---------- */
 
     private function uri(string $path): string
@@ -259,6 +384,25 @@ final class VatEndpoint
             throw HttpException::fromResponse($code, (string) $response->getBody(), retryAfter: $this->retryAfterOf($response));
         }
         return (string) $response->getBody();
+    }
+
+    /** GET of a CSV download: like binaryGet, but a 422 (invalid filter) becomes a ValidationException. */
+    private function csvGet(string $uri): string
+    {
+        $response = $this->send(
+            fn () => $this->req->createRequest('GET', $uri)->withHeader('Accept', 'text/csv, application/json'),
+        );
+        $code = $response->getStatusCode();
+        $body = (string) $response->getBody();
+
+        if ($code === 422) {
+            throw ValidationException::fromResponseBody($body);
+        }
+        if ($code !== 200) {
+            throw HttpException::fromResponse($code, $body, retryAfter: $this->retryAfterOf($response));
+        }
+
+        return $body;
     }
 
     private function binaryPost(string $uri, array $body): string

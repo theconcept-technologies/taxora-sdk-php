@@ -18,6 +18,7 @@ use Taxora\Sdk\Http\InMemoryTokenStorage;
 use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Tests\Fixtures\FakeNetworkException;
 use Taxora\Sdk\Tests\Fixtures\SequenceHttpClient;
+use Taxora\Sdk\ValueObjects\LocalTaxNumberRow;
 use Taxora\Sdk\ValueObjects\VatCertificateExport;
 use Taxora\Sdk\ValueObjects\VatResource;
 use Taxora\Sdk\ValueObjects\VatValidationAddressInput;
@@ -637,6 +638,98 @@ final class VatEndpointTest extends TestCase
 
         $endpoint->validate('ATU12345678', "\xB1\x31");
         self::assertCount(0, $http->requests);
+    }
+
+    private const LOCAL_TAX_NUMBERS_CSV = "\xEF\xBB\xBF"
+        . "companyName,requestedName,country,vatNumber,vatStatus,taxNumber,taxNumberName,taxNumberSource,source,checkedAt,checkId\n"
+        . "\"Eni S.p.A., Roma\",,IT,IT00905811006,valid,\"\t00905811006\",\"Partita IVA\",vat_id,vat_check,2026-10-22T09:15:00+00:00,uuid-1\n"
+        . "\"Fritz Schiller OHG\",\"Fritz Schiller\",DE,,no_vat_id,\"\t21815953301\",Steuernummer,company_website,smart_enrichment,2026-10-21T08:00:00+00:00,job-2\n"
+        . "\"Unknown GmbH\",,AT,,not_found,,,,smart_enrichment,2026-10-20T07:00:00+00:00,job-3\n";
+
+    public function testLocalTaxNumbersCsvSendsTheFiltersAndReturnsTheRawBody(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'text/csv; charset=UTF-8'], self::LOCAL_TAX_NUMBERS_CSV),
+        ]);
+
+        $csv = $this->createEndpoint($http)->localTaxNumbersCsv(
+            new \DateTimeImmutable('2026-10-01'),
+            '2026-10-23',
+            ['pl', 'IT'],
+            true
+        );
+
+        self::assertSame(self::LOCAL_TAX_NUMBERS_CSV, $csv);
+        $request = $http->requests[0];
+        self::assertSame('GET', $request->getMethod());
+        self::assertSame('/v1/reports/local-tax-numbers', $request->getUri()->getPath());
+        self::assertSame(
+            'date_from=2026-10-01&date_to=2026-10-23&countries%5B%5D=PL&countries%5B%5D=IT&only_with_tax_number=1',
+            $request->getUri()->getQuery()
+        );
+        self::assertStringContainsString('text/csv', $request->getHeaderLine('Accept'));
+    }
+
+    public function testLocalTaxNumbersParsesRowsDropsTheBomAndTrimsTheExcelTab(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'text/csv; charset=UTF-8'], self::LOCAL_TAX_NUMBERS_CSV),
+        ]);
+
+        $rows = $this->createEndpoint($http)->localTaxNumbers();
+
+        self::assertCount(3, $rows);
+        self::assertContainsOnlyInstancesOf(LocalTaxNumberRow::class, $rows);
+        self::assertSame('Eni S.p.A., Roma', $rows[0]->companyName, 'BOM is not part of the first value');
+        self::assertNull($rows[0]->requestedName);
+        self::assertSame('00905811006', $rows[0]->taxNumber, 'leading TAB and zeros: tab trimmed, zeros kept');
+        self::assertSame('Partita IVA', $rows[0]->taxNumberName);
+        self::assertSame('vat_id', $rows[0]->taxNumberSource);
+        self::assertSame('vat_check', $rows[0]->source);
+        self::assertSame('uuid-1', $rows[0]->checkId);
+        self::assertSame('21815953301', $rows[1]->taxNumber);
+        self::assertSame('company_website', $rows[1]->taxNumberSource);
+        self::assertNull($rows[1]->vatNumber);
+        self::assertNull($rows[2]->taxNumber);
+        self::assertNull($rows[2]->taxNumberSource);
+        self::assertSame('not_found', $rows[2]->vatStatus);
+        self::assertSame('', $http->requests[0]->getUri()->getQuery(), 'no filters, no query');
+    }
+
+    public function testParseLocalTaxNumbersCsvHandlesAnEmptyReport(): void
+    {
+        self::assertSame([], VatEndpoint::parseLocalTaxNumbersCsv(
+            "\xEF\xBB\xBFcompanyName,requestedName,country,vatNumber,vatStatus,taxNumber,taxNumberName,taxNumberSource,source,checkedAt,checkId\n"
+        ));
+        self::assertSame([], VatEndpoint::parseLocalTaxNumbersCsv(''));
+    }
+
+    public function testLocalTaxNumbersSummaryReturnsTheCounts(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode(['companies' => 120, 'withTaxNumber' => 87])),
+        ]);
+
+        $summary = $this->createEndpoint($http)->localTaxNumbersSummary('2026-10-01', null, ['PL']);
+
+        self::assertSame(120, $summary->companies);
+        self::assertSame(87, $summary->withTaxNumber);
+        self::assertSame(['companies' => 120, 'withTaxNumber' => 87], $summary->toArray());
+        self::assertSame('/v1/reports/local-tax-numbers/summary', $http->requests[0]->getUri()->getPath());
+        self::assertSame('date_from=2026-10-01&countries%5B%5D=PL', $http->requests[0]->getUri()->getQuery());
+    }
+
+    public function testLocalTaxNumbersCsvTurnsAnInvalidFilterIntoAValidationException(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(422, ['Content-Type' => 'application/json'], json_encode([
+                'message' => 'The date to field must be a date after or equal to date from.',
+                'errors' => ['date_to' => ['The date to field must be a date after or equal to date from.']],
+            ])),
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $this->createEndpoint($http)->localTaxNumbersCsv('2026-10-23', '2026-10-01');
     }
 
     private function createEndpoint(SequenceHttpClient $http, ?RetryPolicy $retryPolicy = null): VatEndpoint

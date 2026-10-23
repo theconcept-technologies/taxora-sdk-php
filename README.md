@@ -243,6 +243,37 @@ foreach ($stats->byOutcome as $row) {
 > number (common for purely-domestic German firms). It is a definitive answer — not a failure —
 > and is not billed.
 
+### 🧾 Local tax numbers report
+
+Every company you checked — single and bulk VAT checks and Smart Enrichment lookups — once, with
+its **local tax number** (NIP, SIREN, Partita IVA, Steuernummer …), the number's national name and
+where it comes from (`vat_id` = read off the confirmed VAT ID, `company_website` = published by the
+company). All filters are optional.
+
+```php
+// Parsed rows (BOM dropped, cells trimmed, empty cells null)
+$rows = $client->vat()->localTaxNumbers(
+    dateFrom: '2026-10-01',            // optional (Y-m-d or DateTimeInterface)
+    dateTo: '2026-10-31',              // optional
+    countries: ['PL', 'IT'],           // optional (ISO-2)
+    onlyWithTaxNumber: true,           // optional: skip companies without one
+);
+foreach ($rows as $row) {
+    // e.g. Orlen S.A. PL 5260250995 (NIP, vat_id)
+    echo "{$row->companyName} {$row->country} {$row->taxNumber} ({$row->taxNumberName}, {$row->taxNumberSource})" . PHP_EOL;
+}
+// $row->vatStatus: valid | invalid | unconfirmed | wrong_company | no_vat_id | not_found
+// $row->source: vat_check | smart_enrichment; $row->checkId: the VAT check uuid or the lookup job id
+
+// The raw CSV (UTF-8 with BOM) for a spreadsheet. Digit-only tax numbers carry a leading TAB so
+// Excel keeps leading zeros; VatEndpoint::parseLocalTaxNumbersCsv() turns a saved file into rows.
+file_put_contents('local-tax-numbers.csv', $client->vat()->localTaxNumbersCsv(countries: ['PL']));
+
+// Counts for the same filters
+$summary = $client->vat()->localTaxNumbersSummary(dateFrom: '2026-10-01');
+echo "{$summary->withTaxNumber} of {$summary->companies} companies have a local tax number" . PHP_EOL;
+```
+
 ### 🇫🇷 E-Reporting / Compliance (DGFiP Flux 10)
 
 Full French e-reporting flow: enroll a company with the provider, record (and
@@ -636,6 +667,8 @@ Each endpoint handles:
 | `PeppolLookupResult` | Peppol directory answer (`status` reachable / not_reachable / pending, supported document types)      |
 | `RevenueStatistics` | Aggregated turnover statistics over compliance transactions                                            |
 | `SmartEnrichmentJob` | Smart Enrichment (reverse VAT lookup) job with its results                                            |
+| `LocalTaxNumberRow` | One company of the local tax numbers report (`taxNumber`, `taxNumberName`, `taxNumberSource`, `vatStatus`) |
+| `LocalTaxNumberSummary` | `companies` / `withTaxNumber` counts of the local tax numbers report                              |
 
 Example:
 
