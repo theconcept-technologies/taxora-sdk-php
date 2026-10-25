@@ -23,6 +23,8 @@ final readonly class SmartEnrichmentJob
         public ?int $completedCount = null,
         public ?int $foundCount = null,
         public array $results = [],
+        /** Which rows can be checked again and which are being rechecked (null on older API versions). */
+        public ?SmartEnrichmentRecheckState $recheck = null,
     ) {
     }
 
@@ -50,6 +52,7 @@ final readonly class SmartEnrichmentJob
             completedCount: isset($data['completedCount']) ? (int) $data['completedCount'] : null,
             foundCount: isset($data['foundCount']) ? (int) $data['foundCount'] : null,
             results: $results,
+            recheck: is_array($data['recheck'] ?? null) ? SmartEnrichmentRecheckState::fromArray($data['recheck']) : null,
         );
     }
 

@@ -196,6 +196,19 @@ $done = $client->smartEnrichment()->waitUntilComplete(
     pollIntervalSeconds: 2.0,
 );
 
+// Check again: search once more for rows without a usable answer (not_found, or a number
+// registered to another company). Every recheck counts as a check like a new lookup
+// (Deep Verify ×2), found or not. Max 3 per row, 7 days apart; no_vat_exists and found
+// rows are never rechecked. Ask first what it would cost with a dry run:
+$plan = $client->smartEnrichment()->recheck($bulk->jobId, dryRun: true);
+echo count($plan->rows) . ' rows, ' . $plan->checks . ' checks' . PHP_EOL; // skipped: $plan->skipped
+$started = $client->smartEnrichment()->recheck($bulk->jobId);           // all rows that qualify
+// $client->smartEnrichment()->recheck($bulk->jobId, rows: [3, 7]);     // or just these rows
+// Improved rows arrive via the `enrichment.updated` webhook; or poll:
+$job = $client->smartEnrichment()->get($bulk->jobId);
+echo $job->recheck?->isActive() ? 'still rechecking' : 'done';
+echo $job->results[3]->recheckCount . '× rechecked, last ' . $job->results[3]->lastRecheckedAt . PHP_EOL;
+
 // Lookup history (paginated, newest first; optional free-text search over the
 // queried company name and the resolved VAT number / matched name; perPage is
 // capped at 100 server-side)

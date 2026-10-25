@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use GuzzleHttp\Psr7\Response;
+use InvalidArgumentException;
 use Http\Factory\Guzzle\RequestFactory;
 use Http\Factory\Guzzle\StreamFactory;
 use PHPUnit\Framework\TestCase;
@@ -776,6 +777,114 @@ final class SmartEnrichmentEndpointTest extends TestCase
     // ---------------------------------------------------------------------
     // Search mode
     // ---------------------------------------------------------------------
+
+    public function testRecheckPostsTheRowsAndReturnsWhatItStarted(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(202, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-1',
+                'rows' => [0, 3],
+                'checks' => 2,
+                'skipped' => ['cooldown' => 1],
+                'dryRun' => false,
+            ])),
+        ]);
+
+        $recheck = $this->createEndpoint($http)->recheck('job-1', [0, 3, 3]);
+
+        self::assertSame([0, 3], $recheck->rows);
+        self::assertSame(2, $recheck->checks);
+        self::assertSame(['cooldown' => 1], $recheck->skipped);
+        self::assertFalse($recheck->dryRun);
+
+        $request = $http->requests[0];
+        self::assertSame('POST', $request->getMethod());
+        self::assertSame('/v1/smart-enrichment/job-1/recheck', $request->getUri()->getPath());
+        self::assertSame(['rows' => [0, 3]], $this->decodeBody($http), 'duplicates dropped, dryRun only sent when set');
+    }
+
+    public function testRecheckDryRunWithoutRowsAsksForEveryRowThatQualifies(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-1',
+                'rows' => [1],
+                'checks' => 2,
+                'skipped' => [],
+                'dryRun' => true,
+            ])),
+        ]);
+
+        $recheck = $this->createEndpoint($http)->recheck('job-1', dryRun: true);
+
+        self::assertTrue($recheck->dryRun);
+        self::assertSame(2, $recheck->checks);
+        self::assertSame(['dryRun' => true], $this->decodeBody($http));
+    }
+
+    public function testRecheckWithNothingToCheckThrowsValidationException(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(422, ['Content-Type' => 'application/json'], json_encode([
+                'message' => 'None of these rows can be checked again right now.',
+                'code' => 'smart_enrichment_recheck_nothing',
+                'skipped' => ['running' => 2],
+            ])),
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('None of these rows can be checked again right now.');
+
+        $this->createEndpoint($http)->recheck('job-1');
+    }
+
+    public function testRecheckRejectsBadInputBeforeAnyRequest(): void
+    {
+        $http = new SequenceHttpClient([]);
+        $endpoint = $this->createEndpoint($http);
+
+        foreach ([['', null], ['job-1', []], ['job-1', [-1]], ['job-1', ['1']]] as [$jobId, $rows]) {
+            try {
+                $endpoint->recheck($jobId, $rows);
+                self::fail('Expected InvalidArgumentException for ' . json_encode([$jobId, $rows]));
+            } catch (InvalidArgumentException) {
+                // expected
+            }
+        }
+
+        self::assertCount(0, $http->requests);
+    }
+
+    public function testGetParsesRecheckStateAndRowRecheckFields(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'jobId' => 'job-1',
+                'status' => 'completed',
+                'itemCount' => 2,
+                'results' => [
+                    ['status' => 'not_found', 'recheckCount' => 1, 'lastRecheckedAt' => '2026-10-25T10:00:00+00:00'],
+                    ['status' => 'not_found'],
+                ],
+                'recheck' => [
+                    'eligible' => [1],
+                    'runs' => ['0' => ['state' => 'running']],
+                    'maxPerRow' => 3,
+                    'cooldownDays' => 7,
+                ],
+            ])),
+        ]);
+
+        $job = $this->createEndpoint($http)->get('job-1');
+
+        self::assertNotNull($job->recheck);
+        self::assertSame([1], $job->recheck->eligible);
+        self::assertSame(['state' => 'running'], $job->recheck->runs[0]);
+        self::assertTrue($job->recheck->isActive());
+        self::assertSame(1, $job->results[0]->recheckCount);
+        self::assertSame('2026-10-25T10:00:00+00:00', $job->results[0]->lastRecheckedAt);
+        self::assertNull($job->results[1]->recheckCount);
+    }
 
     private function processingResponse(string $jobId = 'job-1'): Response
     {

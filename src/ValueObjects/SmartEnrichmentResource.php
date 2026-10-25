@@ -101,6 +101,10 @@ final readonly class SmartEnrichmentResource
          * exact) or 'company_website' (published by the company itself, not officially confirmable).
          */
         public ?string $taxNumberSource = null,
+        /** How often this row was checked again (SmartEnrichmentEndpoint::recheck()); null when never. */
+        public ?int $recheckCount = null,
+        /** When it was last checked again (ISO 8601). */
+        public ?string $lastRecheckedAt = null,
     ) {
     }
 
@@ -142,6 +146,8 @@ final readonly class SmartEnrichmentResource
             taxNumberSource: in_array($data['taxNumberSource'] ?? null, ['vat_id', 'company_website'], true)
                 ? $data['taxNumberSource']
                 : null,
+            recheckCount: is_numeric($data['recheckCount'] ?? null) ? (int) $data['recheckCount'] : null,
+            lastRecheckedAt: self::nonEmptyString($data['lastRecheckedAt'] ?? null),
         );
     }
 
@@ -254,6 +260,8 @@ final readonly class SmartEnrichmentResource
             'taxNumberType' => $this->taxNumberType,
             'taxNumberLabel' => $this->taxNumberLabel,
             'taxNumberSource' => $this->taxNumberSource,
+            'recheckCount' => $this->recheckCount,
+            'lastRecheckedAt' => $this->lastRecheckedAt,
         ];
     }
 }

@@ -23,6 +23,7 @@ use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
 use Taxora\Sdk\ValueObjects\SmartEnrichmentHistoryPage;
 use Taxora\Sdk\ValueObjects\SmartEnrichmentJob;
+use Taxora\Sdk\ValueObjects\SmartEnrichmentRecheck;
 use Taxora\Sdk\ValueObjects\SmartEnrichmentStatistics;
 use Taxora\Sdk\ValueObjects\SmartEnrichmentUsage;
 use Throwable;
@@ -151,6 +152,48 @@ final class SmartEnrichmentEndpoint
         $payload = $this->jsonGet($uri);
 
         return SmartEnrichmentJob::fromArray($this->extractData($payload));
+    }
+
+    /**
+     * Search again for rows of a finished lookup that have no usable answer (`not_found`, or a
+     * number registered to another company). Without $rows every row that qualifies is rechecked.
+     *
+     * Every recheck counts as a check like a new lookup (Deep Verify ×2), whether a VAT number is
+     * found or not. A row can be rechecked up to 3 times, with 7 days between two rechecks;
+     * `no_vat_exists` and found rows are never rechecked. Pass $dryRun to see which rows would run
+     * and what they cost without starting anything. Improved rows arrive via the
+     * `enrichment.updated` webhook; get($jobId)->recheck shows the progress.
+     *
+     * @param list<int>|null $rows 0-based row indexes of the lookup
+     *
+     * @throws ValidationException when nothing can be rechecked, the lookup is still running, or
+     *                             rechecks are not available (sandbox, flat-fee import)
+     * @throws HttpException       429 when the start credit or monthly hard cap does not cover it
+     */
+    public function recheck(string $jobId, ?array $rows = null, bool $dryRun = false): SmartEnrichmentRecheck
+    {
+        if (trim($jobId) === '') {
+            throw new InvalidArgumentException('jobId must not be empty.');
+        }
+        if ($rows !== null) {
+            if ($rows === []) {
+                throw new InvalidArgumentException('rows must not be empty; pass null to recheck every row that qualifies.');
+            }
+            foreach ($rows as $index) {
+                if (!is_int($index) || $index < 0) {
+                    throw new InvalidArgumentException('rows must contain 0-based row indexes (integers >= 0).');
+                }
+            }
+        }
+
+        $body = array_filter([
+            'rows' => $rows !== null ? array_values(array_unique($rows)) : null,
+            'dryRun' => $dryRun ? true : null,
+        ], static fn ($v) => $v !== null);
+
+        $payload = $this->jsonPost($this->uri('/smart-enrichment/' . rawurlencode($jobId) . '/recheck'), $body);
+
+        return SmartEnrichmentRecheck::fromArray($this->extractData($payload));
     }
 
     /**
