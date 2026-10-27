@@ -2640,40 +2640,46 @@ final class EReportingEndpointTest extends TestCase
         $http = new SequenceHttpClient([
             new Response(200, ['Content-Type' => 'application/json'], json_encode([
                 'success' => true,
-                'data' => [[
-                    'country' => 'NO',
-                    'service' => 'e_invoicing',
-                    'currency' => 'EUR',
-                    'active' => false,
-                    'via_stripe' => false,
-                    'plan' => null,
-                    'status' => null,
-                    'enrolled' => false,
-                    'plans' => [[
-                        'key' => 'standard',
-                        'monthly_fee' => 99.0,
-                        'setup_fee' => 199.0,
-                        'usage_tiers' => [['up_to' => 100, 'unit_price' => 0.5]],
-                        'volume_limit' => null,
-                        'contact_only' => false,
-                        'checkout_available' => true,
-                        'requires' => ['country' => 'FR', 'service' => 'e_reporting'],
-                        'eligible' => true,
+                'data' => [
+                    'data' => [[
+                        'country' => 'NO',
+                        'service' => 'e_invoicing',
+                        'currency' => 'EUR',
+                        'active' => false,
+                        'via_stripe' => false,
+                        'plan' => null,
+                        'status' => null,
+                        'enrolled' => false,
+                        'plans' => [[
+                            'key' => 'standard',
+                            'monthly_fee' => 99.0,
+                            'setup_fee' => 199.0,
+                            'usage_tiers' => [['up_to' => 100, 'unit_price' => 0.5]],
+                            'volume_limit' => null,
+                            'contact_only' => false,
+                            'checkout_available' => true,
+                            'requires' => ['country' => 'FR', 'service' => 'e_reporting'],
+                            'eligible' => true,
+                        ]],
                     ]],
-                ]],
-                'coverage' => [
-                    ['country' => 'NO', 'availability' => 'bookable', 'services' => ['e_invoicing'], 'network' => 'peppol', 'format' => 'ehf', 'mandate' => null],
-                    ['country' => 'BE', 'availability' => 'on_request', 'services' => ['e_invoicing'], 'network' => 'peppol', 'format' => null, 'mandate' => '2026-01-01'],
+                    'coverage' => [
+                        ['country' => 'NO', 'availability' => 'bookable', 'services' => ['e_invoicing'], 'network' => 'peppol', 'format' => 'ehf', 'mandate' => null],
+                        ['country' => 'BE', 'availability' => 'on_request', 'services' => ['e_invoicing'], 'network' => 'peppol', 'format' => null, 'mandate' => '2026-01-01'],
+                    ],
+                    'access' => ['e_reporting' => true, 'e_invoicing' => false],
+                    'access_by_country' => ['FR' => ['e_reporting' => true, 'e_invoicing' => false], 'NO' => ['e_invoicing' => false]],
                 ],
-                'access' => ['e_reporting' => true, 'e_invoicing' => false],
-                'access_by_country' => ['FR' => ['e_reporting' => true, 'e_invoicing' => false], 'NO' => ['e_invoicing' => false]],
             ])),
         ]);
 
         $offerings = $this->createEndpoint($http)->getOfferings();
 
         self::assertSame('/v1/compliance/offerings', $http->requests[0]->getUri()->getPath());
+        // Regression: the API nests everything under `data` (returnSuccess envelope).
         self::assertCount(1, $offerings->offerings);
+        self::assertSame('NO', $offerings->offerings[0]->country);
+        self::assertNotSame([], $offerings->coverage);
+        self::assertSame(['FR', 'NO'], array_keys($offerings->accessByCountry));
         $no = $offerings->forCountry('no');
         self::assertNotNull($no);
         self::assertSame(ComplianceService::E_INVOICING, $no->service);

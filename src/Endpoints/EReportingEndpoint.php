@@ -1015,7 +1015,7 @@ final class EReportingEndpoint
      */
     public function getOfferings(): ComplianceOfferings
     {
-        return ComplianceOfferings::fromArray($this->jsonGet($this->uri('/compliance/offerings')));
+        return ComplianceOfferings::fromArray($this->extractData($this->jsonGet($this->uri('/compliance/offerings'))));
     }
 
     /**
@@ -1026,8 +1026,8 @@ final class EReportingEndpoint
      * away (the payment webhook activates it as well).
      *
      * Unknown / contact-only plans, unmet prerequisites and an already active
-     * plan for the country yield a {@see HttpException} with status 422; Stripe
-     * errors a 502. Not retried — a retry could open a second checkout.
+     * plan for the country yield a {@see ValidationException} (HTTP 422); Stripe
+     * errors an {@see HttpException} with status 502. Not retried — a retry could open a second checkout.
      */
     public function createCheckout(string $country, string $plan): ComplianceCheckoutSession
     {

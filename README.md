@@ -973,6 +973,11 @@ Compliance write calls (create / update / delete / submit / import transactions,
 by a user whose only role is **read-only** answer `403` with body code `read_only_role`
 (`HttpException`; read it from `getResponseBody()`) — ask an admin of the company to make the change.
 
+Adding countries or changing plans — creating an enrollment, `createCheckout()`, `confirmCheckout()` and
+`createBillingPortalSession()` — is reserved for company **admins**: a user with the developer role gets
+`403` with body `{"message": "…", "code": "admin_only"}` (`HttpException`) — only admins can add countries
+or change plans.
+
 **Exception messages are always short and safe to log.** A response body is
 never used as the message: gateways in front of the API answer `502`/`503`/`504`
 with a full HTML error page, and that page would otherwise land in every log

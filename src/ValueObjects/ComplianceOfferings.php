@@ -26,7 +26,7 @@ final readonly class ComplianceOfferings
     ) {
     }
 
-    /** @param array<string,mixed> $payload the full response body ({data, coverage, access, access_by_country}) */
+    /** @param array<string,mixed> $payload the response's `data` object ({data, coverage, access, access_by_country}) */
     public static function fromArray(array $payload): self
     {
         $offerings = [];
