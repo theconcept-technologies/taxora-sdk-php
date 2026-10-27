@@ -2481,6 +2481,74 @@ final class EReportingEndpointTest extends TestCase
         self::assertCount(1, $http->requests, '409 is not retried');
     }
 
+    public function testGetTransactionPdfReturnsBytesContentTypeAndFilename(): void
+    {
+        $pdf = "%PDF-1.7\nfake invoice";
+        $http = new SequenceHttpClient([
+            new Response(200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'inline; filename="RE-2026-0201.pdf"',
+            ], $pdf),
+            new Response(200, ['Content-Type' => 'application/pdf'], $pdf),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        $document = $endpoint->getTransactionPdf(88);
+
+        $request = $http->requests[0];
+        self::assertSame('GET', $request->getMethod());
+        self::assertSame('/v1/compliance/transactions/88/pdf', $request->getUri()->getPath());
+        self::assertSame($pdf, $document->content);
+        self::assertSame('application/pdf', $document->contentType);
+        self::assertSame('RE-2026-0201.pdf', $document->filename);
+        self::assertSame(strlen($pdf), $document->size());
+
+        self::assertSame('invoice-88.pdf', $endpoint->getTransactionPdf(88)->filename);
+    }
+
+    public function testGetTransactionPdfWithoutPdfThrows409(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(409, ['Content-Type' => 'application/json'], '{"error":"No PDF is available for this transaction yet."}'),
+        ]);
+
+        try {
+            $this->createEndpoint($http)->getTransactionPdf(88);
+            self::fail('Expected HttpException');
+        } catch (HttpException $e) {
+            self::assertSame(409, $e->getStatusCode());
+        }
+        self::assertCount(1, $http->requests, '409 is not retried');
+    }
+
+    public function testGetTransactionPdfUnknownTransactionThrows404(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(404, ['Content-Type' => 'application/json'], '{"error":"Not found."}'),
+        ]);
+
+        try {
+            $this->createEndpoint($http)->getTransactionPdf(88);
+            self::fail('Expected HttpException');
+        } catch (HttpException $e) {
+            self::assertSame(404, $e->getStatusCode());
+        }
+    }
+
+    public function testTransactionPdfUrlIsParsedAndNullWhenAbsent(): void
+    {
+        $withPdf = ComplianceTransaction::fromArray(self::transactionPayload([
+            'pdf_url' => 'https://sandbox.taxora.io/v1/compliance/transactions/77/pdf',
+        ]));
+        self::assertSame('https://sandbox.taxora.io/v1/compliance/transactions/77/pdf', $withPdf->pdfUrl);
+        self::assertTrue($withPdf->hasPdf());
+
+        $withoutPdf = ComplianceTransaction::fromArray(self::transactionPayload(['pdf_url' => null]));
+        self::assertNull($withoutPdf->pdfUrl);
+        self::assertFalse($withoutPdf->hasPdf());
+        self::assertNull(ComplianceTransaction::fromArray(self::transactionPayload())->pdfUrl);
+    }
+
     /* ---------- tax-rate CSV + per-country filters ---------- */
 
     public function testExportRevenueTaxRatesCsvReturnsRawBytesWithFilters(): void

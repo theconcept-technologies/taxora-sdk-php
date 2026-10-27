@@ -16,7 +16,7 @@ use Taxora\Sdk\Enums\ComplianceTransactionType;
  * reference, provider state, invoice lines) were added with e-invoicing
  * (Norway / Peppol) and default to null / [] when an older server omits them.
  * So do $documentUrl, $deliveryCheck and $invoicePdf (e-invoicing delivery),
- * and $internalReference.
+ * and $internalReference / $pdfUrl.
  */
 final readonly class ComplianceTransaction
 {
@@ -27,6 +27,7 @@ final readonly class ComplianceTransaction
      * @param ComplianceDeliveryCheck|null $deliveryCheck e-invoicing: the Peppol directory answer when it held the invoice back (state not_required or pending)
      * @param ComplianceInvoicePdf|null $invoicePdf e-invoicing: the seller's own PDF sent along with the e-invoice
      * @param string|null $internalReference your own reference (order number, ERP id) for searching — never sent to the buyer or the tax authority
+     * @param string|null $pdfUrl where to download the invoice as a readable PDF (the attached seller PDF or the provider's rendering of the e-invoice; API-key auth) — see EReportingEndpoint::getTransactionPdf(); null while none is available
      */
     public function __construct(
         public int $id,
@@ -71,6 +72,7 @@ final readonly class ComplianceTransaction
         public ?ComplianceDeliveryCheck $deliveryCheck = null,
         public ?ComplianceInvoicePdf $invoicePdf = null,
         public ?string $internalReference = null,
+        public ?string $pdfUrl = null,
     ) {
     }
 
@@ -120,6 +122,7 @@ final readonly class ComplianceTransaction
             deliveryCheck: is_array($data['delivery_check'] ?? null) ? ComplianceDeliveryCheck::fromArray($data['delivery_check']) : null,
             invoicePdf: is_array($data['invoice_pdf'] ?? null) ? ComplianceInvoicePdf::fromArray($data['invoice_pdf']) : null,
             internalReference: isset($data['internal_reference']) ? (string) $data['internal_reference'] : null,
+            pdfUrl: isset($data['pdf_url']) && $data['pdf_url'] !== '' ? (string) $data['pdf_url'] : null,
         );
     }
 
@@ -133,6 +136,12 @@ final readonly class ComplianceTransaction
     public function hasDocument(): bool
     {
         return $this->documentUrl !== null;
+    }
+
+    /** The invoice can be downloaded as a readable PDF (getTransactionPdf()). */
+    public function hasPdf(): bool
+    {
+        return $this->pdfUrl !== null;
     }
 
     /** E-invoicing: the buyer is not on the e-invoicing network, so no e-invoice was sent or billed. */

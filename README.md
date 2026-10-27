@@ -672,6 +672,20 @@ if ($tx->hasDocument()) {
 Not sent yet, or the provider is still preparing the document → `HttpException` with
 status `409`; try again in a few minutes.
 
+The invoice as a readable PDF (your attached PDF, or the provider's rendering of the
+e-invoice) is available once `pdfUrl` is set:
+
+```php
+if ($tx->hasPdf()) {
+    $pdf = $client->eReporting()->getTransactionPdf($tx->id);
+    $pdf->contentType;                  // application/pdf
+    $pdf->filename;                     // e.g. RE-2026-0201.pdf (falls back to invoice-{id}.pdf)
+    $pdf->saveTo('/archive/' . $pdf->filename);
+}
+```
+
+No PDF available (yet) → `HttpException` with status `409`.
+
 ### 🛒 Self-service plans (checkout)
 
 Book a compliance plan without talking to sales. These calls work **without** an
@@ -846,7 +860,7 @@ Each endpoint handles:
 | `PeppolLookupResult` | Peppol directory answer (`status` reachable / not_reachable / pending, supported document types)      |
 | `RevenueStatistics` | Aggregated turnover statistics over compliance transactions                                            |
 | `ComplianceDeliveryCheck` / `ComplianceInvoicePdf` | E-invoicing delivery details on a transaction (`deliveryCheck`, `invoicePdf`) |
-| `ComplianceTransactionDocument` | Legal e-invoice download (`content`, `contentType`, `filename`, `saveTo()`)               |
+| `ComplianceTransactionDocument` | Legal e-invoice or invoice-PDF download (`content`, `contentType`, `filename`, `saveTo()`) |
 | `ComplianceOfferings` | Self-service plans per country, coverage and access flags (`getOfferings()`)                         |
 | `ComplianceCheckoutSession` / `ComplianceSubscriptionState` | Checkout start (`id`, `url`) and confirmation (`active`, `plan`, …) |
 | `UsageSummary` / `UsageSummaryPage` | Billed usage per feature and period, with `UsageEvent`s for a single period            |

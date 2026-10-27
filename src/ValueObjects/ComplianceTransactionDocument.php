@@ -7,15 +7,16 @@ namespace Taxora\Sdk\ValueObjects;
 use InvalidArgumentException;
 
 /**
- * The legal e-invoice of a transaction (usually EHF / Peppol UBL XML) exactly as
- * it was sent to the buyer — returned by EReportingEndpoint::getTransactionDocument().
+ * A transaction download: the legal e-invoice (usually EHF / Peppol UBL XML) exactly
+ * as it was sent to the buyer — returned by EReportingEndpoint::getTransactionDocument() —
+ * or the invoice as a readable PDF, returned by EReportingEndpoint::getTransactionPdf().
  */
 final readonly class ComplianceTransactionDocument
 {
     /**
      * @param string $content the raw document bytes
      * @param string $contentType the response Content-Type, e.g. "application/xml"
-     * @param string $filename from Content-Disposition (falls back to "e-invoice-{id}.{ext}")
+     * @param string $filename from Content-Disposition (falls back to "e-invoice-{id}.{ext}" / "invoice-{id}.pdf")
      */
     public function __construct(
         public string $content,

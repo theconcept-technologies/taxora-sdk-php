@@ -782,6 +782,33 @@ final class EReportingEndpoint
     }
 
     /**
+     * Download the invoice as a readable PDF — the seller's attached PDF, or the
+     * provider's rendering of the e-invoice. Available once
+     * {@see ComplianceTransaction::hasPdf()} ($pdfUrl is set).
+     *
+     * No PDF (yet): an {@see HttpException} with status 409. 404 when the
+     * transaction does not exist, 502 on a provider error.
+     */
+    public function getTransactionPdf(int $id): ComplianceTransactionDocument
+    {
+        $this->assertPositiveId($id, 'id');
+
+        $uri = $this->uri('/compliance/transactions/' . $id . '/pdf');
+        $response = $this->rawGet($uri, 'application/pdf, application/octet-stream, application/json', 'invoice PDF download');
+
+        $contentType = trim($response->getHeaderLine('Content-Type'));
+        if ($contentType === '') {
+            $contentType = 'application/pdf';
+        }
+
+        return new ComplianceTransactionDocument(
+            content: (string) $response->getBody(),
+            contentType: $contentType,
+            filename: $this->filenameFrom($response) ?? sprintf('invoice-%d.pdf', $id),
+        );
+    }
+
+    /**
      * Bulk-import transactions from a semicolon-separated CSV (max 2 MB). Pass
      * the raw CSV bytes — e.g. file_get_contents('transactions.csv'). Rows are
      * grouped into invoices by invoice_number; re-uploading the same file is
