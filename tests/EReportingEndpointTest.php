@@ -2109,6 +2109,473 @@ final class EReportingEndpointTest extends TestCase
         self::assertSame(['Bearer refreshed-token'], $http->requests[1]->getHeader('Authorization'));
     }
 
+    /* ---------- e-invoicing delivery: PDF, document, not_required ---------- */
+
+    public function testCreateTransactionEncodesRawPdfBytesAsBase64(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::norwayTransactionPayload([
+                    'invoice_pdf' => ['filename' => 'NO-2026-0001.pdf', 'size' => 18, 'attached' => true],
+                ]),
+            ])),
+        ]);
+
+        $pdf = "%PDF-1.4\nfake pdf\n";
+        $tx = $this->createEndpoint($http)->createTransaction(
+            enrollmentId: 21,
+            transactionType: 'b2b_domestic_outbound',
+            invoiceNumber: 'NO-2026-0001',
+            invoiceDate: '2026-09-25',
+            subtotal: 1000,
+            total: 1250,
+            invoiceLines: [self::norwayLine()],
+            counterpartyRegisterId: '923609016',
+            invoicePdf: $pdf,
+            invoicePdfFilename: 'NO-2026-0001.pdf',
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame(base64_encode($pdf), $payload['invoice_pdf']);
+        self::assertSame('NO-2026-0001.pdf', $payload['invoice_pdf_filename']);
+
+        self::assertNotNull($tx->invoicePdf);
+        self::assertSame('NO-2026-0001.pdf', $tx->invoicePdf->filename);
+        self::assertSame(18, $tx->invoicePdf->size);
+        self::assertTrue($tx->invoicePdf->attached);
+    }
+
+    public function testCreateTransactionReadsPdfFromPathAndDefaultsFilename(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'taxora');
+        self::assertIsString($path);
+        $file = $path . '-invoice.pdf';
+        rename($path, $file);
+        file_put_contents($file, "%PDF-1.7\nfrom disk\n");
+
+        try {
+            $http = new SequenceHttpClient([
+                new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                    'success' => true,
+                    'data' => self::transactionPayload(),
+                ])),
+            ]);
+
+            $this->createEndpoint($http)->createTransaction(
+                enrollmentId: 12,
+                transactionType: 'b2c_outbound',
+                invoiceNumber: 'TKT-2026-00001',
+                invoiceDate: '2026-06-15',
+                subtotal: 100,
+                total: 120,
+                invoiceLines: [self::sampleLine()],
+                invoicePdf: $file,
+            );
+
+            $payload = json_decode((string) $http->requests[0]->getBody(), true);
+            self::assertSame(base64_encode("%PDF-1.7\nfrom disk\n"), $payload['invoice_pdf']);
+            self::assertSame(basename($file), $payload['invoice_pdf_filename']);
+        } finally {
+            @unlink($file);
+        }
+    }
+
+    public function testUpdateTransactionPassesBase64AndDataUriPdfThrough(): void
+    {
+        $pdf = "%PDF-1.4\nupdated\n";
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode(['success' => true, 'data' => self::transactionPayload()])),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode(['success' => true, 'data' => self::transactionPayload()])),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        $endpoint->updateTransaction(77, invoicePdf: base64_encode($pdf));
+        $endpoint->updateTransaction(77, invoicePdf: 'data:application/pdf;base64,' . base64_encode($pdf));
+
+        foreach ($http->requests as $request) {
+            $payload = json_decode((string) $request->getBody(), true);
+            self::assertSame(['invoice_pdf' => base64_encode($pdf)], $payload, 'a PDF alone is a valid update');
+        }
+    }
+
+    public function testInvoicePdfIsValidatedBeforeHttp(): void
+    {
+        $http = new SequenceHttpClient([]);
+        $endpoint = $this->createEndpoint($http);
+
+        foreach ([
+            ['not a pdf at all', null],
+            [base64_encode('PK zip file'), null],
+            ["%PDF-1.4\n" . str_repeat('x', 10 * 1024 * 1024), null],
+            ["%PDF-1.4\n", str_repeat('n', 121)],
+        ] as [$pdf, $filename]) {
+            try {
+                $endpoint->updateTransaction(77, invoicePdf: $pdf, invoicePdfFilename: $filename);
+                self::fail('Expected InvalidArgumentException');
+            } catch (InvalidArgumentException) {
+                // expected
+            }
+        }
+
+        try {
+            $endpoint->updateTransaction(77, invoicePdfFilename: 'invoice.pdf');
+            self::fail('Expected InvalidArgumentException');
+        } catch (InvalidArgumentException $e) {
+            self::assertStringContainsString('requires invoicePdf', $e->getMessage());
+        }
+
+        self::assertCount(0, $http->requests);
+    }
+
+    public function testTransactionExposesDocumentUrlDeliveryCheckAndNotRequired(): void
+    {
+        $tx = ComplianceTransaction::fromArray(self::norwayTransactionPayload([
+            'state' => 'not_required',
+            'state_label' => 'No e-invoice required',
+            'document_url' => null,
+            'delivery_check' => ['status' => 'not_reachable', 'reachable' => false, 'checked_at' => '2026-10-01T10:00:00+00:00'],
+            'invoice_pdf' => null,
+        ]));
+
+        self::assertSame(ComplianceTransactionState::NOT_REQUIRED, $tx->state);
+        self::assertTrue($tx->state->isTerminal());
+        self::assertTrue($tx->isNotRequired());
+        self::assertFalse($tx->hasDocument());
+        self::assertNull($tx->invoicePdf);
+        self::assertNotNull($tx->deliveryCheck);
+        self::assertSame(PeppolLookupStatus::NOT_REACHABLE, $tx->deliveryCheck->status);
+        self::assertFalse($tx->deliveryCheck->reachable);
+        self::assertSame('2026-10-01T10:00:00+00:00', $tx->deliveryCheck->checkedAt);
+
+        $sent = ComplianceTransaction::fromArray(self::norwayTransactionPayload([
+            'document_url' => 'https://sandbox.taxora.io/v1/compliance/transactions/88/document',
+        ]));
+        self::assertTrue($sent->hasDocument());
+        self::assertSame('https://sandbox.taxora.io/v1/compliance/transactions/88/document', $sent->documentUrl);
+        self::assertNull($sent->deliveryCheck);
+
+        $pending = ComplianceTransaction::fromArray(self::transactionPayload([
+            'delivery_check' => ['status' => 'pending', 'reachable' => null, 'checked_at' => null],
+        ]));
+        self::assertNotNull($pending->deliveryCheck);
+        self::assertSame(PeppolLookupStatus::PENDING, $pending->deliveryCheck->status);
+        self::assertNull($pending->deliveryCheck->reachable);
+    }
+
+    public function testListTransactionsAcceptsNotRequiredStateFilter(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['data' => [], 'meta' => ['current_page' => 1, 'per_page' => 25, 'total' => 0, 'last_page' => 1]],
+            ])),
+        ]);
+
+        $this->createEndpoint($http)->listTransactions(state: ComplianceTransactionState::NOT_REQUIRED);
+
+        parse_str($http->requests[0]->getUri()->getQuery(), $query);
+        self::assertSame('not_required', $query['state']);
+    }
+
+    public function testGetTransactionDocumentReturnsContentTypeAndFilename(): void
+    {
+        $xml = '<?xml version="1.0"?><Invoice/>';
+        $http = new SequenceHttpClient([
+            new Response(200, [
+                'Content-Type' => 'application/xml',
+                'Content-Disposition' => 'attachment; filename="NO-2026-0001.xml"',
+            ], $xml),
+        ]);
+
+        $document = $this->createEndpoint($http)->getTransactionDocument(88);
+
+        $request = $http->requests[0];
+        self::assertSame('GET', $request->getMethod());
+        self::assertSame('/v1/compliance/transactions/88/document', $request->getUri()->getPath());
+        self::assertSame($xml, $document->content);
+        self::assertSame('application/xml', $document->contentType);
+        self::assertSame('NO-2026-0001.xml', $document->filename);
+        self::assertSame(strlen($xml), $document->size());
+
+        $target = tempnam(sys_get_temp_dir(), 'taxora-doc');
+        self::assertIsString($target);
+        try {
+            self::assertSame(strlen($xml), $document->saveTo($target));
+            self::assertSame($xml, file_get_contents($target));
+        } finally {
+            @unlink($target);
+        }
+    }
+
+    public function testGetTransactionDocumentFallsBackToGeneratedFilenameAndStripsPaths(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/xml; charset=UTF-8'], '<Invoice/>'),
+            new Response(200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="../../etc/passwd"',
+            ], '%PDF-'),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        self::assertSame('e-invoice-88.xml', $endpoint->getTransactionDocument(88)->filename);
+        self::assertSame('passwd', $endpoint->getTransactionDocument(88)->filename);
+    }
+
+    public function testGetTransactionDocumentNotSentYetThrows409(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(409, ['Content-Type' => 'application/json'], '{"error":"The e-invoice has not been sent yet, so there is no legal document to download."}'),
+        ]);
+
+        try {
+            $this->createEndpoint($http)->getTransactionDocument(88);
+            self::fail('Expected HttpException');
+        } catch (HttpException $e) {
+            self::assertSame(409, $e->getStatusCode());
+        }
+        self::assertCount(1, $http->requests, '409 is not retried');
+    }
+
+    /* ---------- tax-rate CSV + per-country filters ---------- */
+
+    public function testExportRevenueTaxRatesCsvReturnsRawBytesWithFilters(): void
+    {
+        $csv = "\xEF\xBB\xBFmonth;currency;tax_category;tax_rate_percent;lines;net;vat;gross\n2026-09;EUR;S;20;3;300.00;60.00;360.00\n";
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'text/csv; charset=UTF-8'], $csv),
+        ]);
+
+        $result = $this->createEndpoint($http)->exportRevenueTaxRatesCsv(
+            dateFrom: '2026-01-01',
+            dateTo: new DateTimeImmutable('2026-09-30'),
+            transactionType: ComplianceTransactionType::B2C_OUTBOUND,
+            state: 'submitted',
+            complianceEnrollmentId: 12,
+        );
+
+        self::assertSame($csv, $result, 'bytes (incl. a BOM) are returned untouched');
+        $request = $http->requests[0];
+        self::assertSame('/v1/compliance/revenue-statistics/tax-rates.csv', $request->getUri()->getPath());
+        self::assertStringContainsString('text/csv', $request->getHeaderLine('Accept'));
+        parse_str($request->getUri()->getQuery(), $query);
+        self::assertSame([
+            'date_from' => '2026-01-01',
+            'date_to' => '2026-09-30',
+            'transaction_type' => 'b2c_outbound',
+            'state' => 'submitted',
+            'compliance_enrollment_id' => '12',
+        ], $query);
+    }
+
+    public function testExportRevenueTaxRatesCsvThrowsValidationExceptionOn422(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(422, ['Content-Type' => 'application/json'], '{"message":"The given data was invalid.","errors":{"date_to":["invalid"]}}'),
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $this->createEndpoint($http)->exportRevenueTaxRatesCsv();
+    }
+
+    public function testGetRevenueStatisticsFiltersByEnrollment(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode(['success' => true, 'data' => self::statisticsPayload()])),
+        ]);
+
+        $this->createEndpoint($http)->getRevenueStatistics(complianceEnrollmentId: 21);
+
+        self::assertSame('compliance_enrollment_id=21', $http->requests[0]->getUri()->getQuery());
+    }
+
+    public function testListTaxReportsFiltersByCountry(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['data' => [], 'meta' => ['current_page' => 1, 'per_page' => 25, 'total' => 0, 'last_page' => 1]],
+            ])),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        $endpoint->listTaxReports(country: 'fr');
+        parse_str($http->requests[0]->getUri()->getQuery(), $query);
+        self::assertSame('FR', $query['country']);
+
+        $this->expectException(InvalidArgumentException::class);
+        $endpoint->listTaxReports(country: 'FRA');
+    }
+
+    public function testReadOnlyRoleWriteSurfacesAs403HttpException(): void
+    {
+        $body = '{"message":"Your role is read-only. Ask an admin of your company to make this change.","code":"read_only_role"}';
+        $http = new SequenceHttpClient([new Response(403, ['Content-Type' => 'application/json'], $body)]);
+
+        try {
+            $this->createEndpoint($http)->submitTransaction(77);
+            self::fail('Expected HttpException');
+        } catch (HttpException $e) {
+            self::assertSame(403, $e->getStatusCode());
+            self::assertSame('read_only_role', json_decode((string) $e->getResponseBody(), true)['code']);
+        }
+    }
+
+    /* ---------- self-service checkout ---------- */
+
+    public function testGetOfferingsParsesFullEnvelope(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [[
+                    'country' => 'NO',
+                    'service' => 'e_invoicing',
+                    'currency' => 'EUR',
+                    'active' => false,
+                    'via_stripe' => false,
+                    'plan' => null,
+                    'status' => null,
+                    'enrolled' => false,
+                    'plans' => [[
+                        'key' => 'standard',
+                        'monthly_fee' => 99.0,
+                        'setup_fee' => 199.0,
+                        'usage_tiers' => [['up_to' => 100, 'unit_price' => 0.5]],
+                        'volume_limit' => null,
+                        'contact_only' => false,
+                        'checkout_available' => true,
+                        'requires' => ['country' => 'FR', 'service' => 'e_reporting'],
+                        'eligible' => true,
+                    ]],
+                ]],
+                'coverage' => [
+                    ['country' => 'NO', 'availability' => 'bookable', 'services' => ['e_invoicing'], 'network' => 'peppol', 'format' => 'ehf', 'mandate' => null],
+                    ['country' => 'BE', 'availability' => 'on_request', 'services' => ['e_invoicing'], 'network' => 'peppol', 'format' => null, 'mandate' => '2026-01-01'],
+                ],
+                'access' => ['e_reporting' => true, 'e_invoicing' => false],
+                'access_by_country' => ['FR' => ['e_reporting' => true, 'e_invoicing' => false], 'NO' => ['e_invoicing' => false]],
+            ])),
+        ]);
+
+        $offerings = $this->createEndpoint($http)->getOfferings();
+
+        self::assertSame('/v1/compliance/offerings', $http->requests[0]->getUri()->getPath());
+        self::assertCount(1, $offerings->offerings);
+        $no = $offerings->forCountry('no');
+        self::assertNotNull($no);
+        self::assertSame(ComplianceService::E_INVOICING, $no->service);
+        $plan = $no->findPlan('standard');
+        self::assertNotNull($plan);
+        self::assertSame(99.0, $plan->monthlyFee);
+        self::assertSame(199.0, $plan->setupFee);
+        self::assertTrue($plan->checkoutAvailable);
+        self::assertSame(['country' => 'FR', 'service' => 'e_reporting'], $plan->requires);
+        self::assertCount(2, $offerings->coverage);
+        self::assertTrue($offerings->coverage[0]->isBookable());
+        self::assertFalse($offerings->coverage[1]->isBookable());
+        self::assertTrue($offerings->eReportingAccess);
+        self::assertFalse($offerings->eInvoicingAccess);
+        self::assertTrue($offerings->hasAccess('fr', 'e_reporting'));
+        self::assertFalse($offerings->hasAccess('NO', 'e_invoicing'));
+        self::assertNull($offerings->forCountry('DE'));
+    }
+
+    public function testCreateCheckoutPostsCountryAndPlan(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['id' => 'cs_test_123', 'url' => 'https://checkout.stripe.com/c/pay/cs_test_123'],
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $session = $this->createEndpoint($http)->createCheckout('no', 'standard');
+
+        $request = $http->requests[0];
+        self::assertSame('POST', $request->getMethod());
+        self::assertSame('/v1/compliance/checkout', $request->getUri()->getPath());
+        self::assertSame(['country' => 'NO', 'plan' => 'standard'], json_decode((string) $request->getBody(), true));
+        self::assertSame('cs_test_123', $session->id);
+        self::assertSame('https://checkout.stripe.com/c/pay/cs_test_123', $session->url);
+    }
+
+    public function testCreateCheckoutValidatesInputAndSurfaces422(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(422, ['Content-Type' => 'application/json'], '{"error":"A plan for NO is already active."}'),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        foreach ([['NOR', 'standard'], ['NO', ' '], ['NO', str_repeat('p', 31)]] as [$country, $plan]) {
+            try {
+                $endpoint->createCheckout($country, $plan);
+                self::fail('Expected InvalidArgumentException');
+            } catch (InvalidArgumentException) {
+                // expected
+            }
+        }
+        self::assertCount(0, $http->requests);
+
+        $this->expectException(ValidationException::class);
+        $endpoint->createCheckout('NO', 'standard');
+    }
+
+    public function testConfirmCheckoutReturnsSubscriptionState(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['active' => true, 'country' => 'NO', 'service' => 'e_invoicing', 'plan' => 'standard', 'status' => 'active'],
+            ])),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['active' => false, 'country' => null, 'service' => null, 'plan' => null, 'status' => null],
+            ])),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        $state = $endpoint->confirmCheckout('cs_test_123');
+        self::assertSame('/v1/compliance/checkout/confirm', $http->requests[0]->getUri()->getPath());
+        self::assertSame(['session_id' => 'cs_test_123'], json_decode((string) $http->requests[0]->getBody(), true));
+        self::assertTrue($state->active);
+        self::assertSame('NO', $state->country);
+        self::assertSame('e_invoicing', $state->service);
+        self::assertSame('standard', $state->plan);
+        self::assertSame('active', $state->status);
+
+        $unknown = $endpoint->confirmCheckout('cs_foreign');
+        self::assertFalse($unknown->active);
+        self::assertNull($unknown->country);
+
+        $this->expectException(InvalidArgumentException::class);
+        $endpoint->confirmCheckout('');
+    }
+
+    public function testCreateBillingPortalSessionReturnsUrlAnd404WithoutPlan(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['url' => 'https://billing.stripe.com/p/session/test_123'],
+            ], JSON_UNESCAPED_SLASHES)),
+            new Response(404, ['Content-Type' => 'application/json'], '{"error":"No plan was bought via Stripe."}'),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        self::assertSame('https://billing.stripe.com/p/session/test_123', $endpoint->createBillingPortalSession());
+        self::assertSame('POST', $http->requests[0]->getMethod());
+        self::assertSame('/v1/compliance/billing-portal', $http->requests[0]->getUri()->getPath());
+
+        try {
+            $endpoint->createBillingPortalSession();
+            self::fail('Expected HttpException');
+        } catch (HttpException $e) {
+            self::assertSame(404, $e->getStatusCode());
+        }
+    }
+
     /* ---------- fixtures ---------- */
 
     private static function sampleLine(): ComplianceInvoiceLine

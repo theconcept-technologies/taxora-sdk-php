@@ -400,6 +400,7 @@ foreach ($result->errors as $error) {
 
 ```php
 $reports = $client->eReporting()->listTaxReports(state: 'refused'); // new | sent | acknowledged | registered | refused | error
+$frOnly  = $client->eReporting()->listTaxReports(country: 'FR');     // one country at a time
 foreach ($reports as $report) {
     echo $report->state->value . ' — ' . ($report->refusalReason ?? 'ok') . PHP_EOL;
 }
@@ -425,6 +426,7 @@ $stats = $client->eReporting()->getRevenueStatistics(
     interval: 'month',               // 'day' | 'week' | 'month' (default 'month')
     transactionType: 'b2c_outbound', // optional filter (string or ComplianceTransactionType)
     state: 'submitted',              // optional filter (string or ComplianceTransactionState)
+    complianceEnrollmentId: 12,      // optional: one enrollment = one country (e.g. France without Norway)
 );
 
 echo $stats->primaryCurrency;        // e.g. EUR
@@ -442,6 +444,23 @@ $rates = $client->eReporting()->getVatRates('FR');
 foreach ($rates->rates as $rate) {
     echo $rate->percent . '% (' . $rate->category . ')' . ($rate->requiresVatex ? ' — VATEX required' : '') . PHP_EOL;
 }
+```
+
+**Net and VAT per month and tax rate (CSV).** For reconciling the reported figures
+with your VAT return — one row per month, currency and tax rate, computed from the
+invoice lines. Semicolon-separated, columns
+`month;currency;tax_category;tax_rate_percent;lines;net;vat;gross`. The bytes are
+returned exactly as sent (nothing is stripped), so you can write them straight to a file:
+
+```php
+$csv = $client->eReporting()->exportRevenueTaxRatesCsv(
+    dateFrom: '2026-01-01',          // optional — defaults to one year before dateTo
+    dateTo: '2026-09-30',            // optional — defaults to today
+    transactionType: null,           // optional, as in getRevenueStatistics()
+    state: 'submitted',              // optional
+    complianceEnrollmentId: 12,      // optional: one country only
+);
+file_put_contents('tax-rates.csv', $csv);
 ```
 
 #### 6. No access yet?
@@ -584,6 +603,120 @@ var_dump($credit->isCreditNote());            // true (documentType = Compliance
 $page = $client->eReporting()->listTransactions(complianceEnrollmentId: $enrollment->id, country: 'NO');
 ```
 
+#### 5. Attach your own invoice PDF
+
+The structured e-invoice (EHF XML) is the legal document; you can send your own
+PDF along as its visual representation. Pass `invoicePdf` to `createTransaction()`
+/ `updateTransaction()` as a **file path, the raw PDF bytes or an already base64-encoded
+PDF** — the SDK checks it is a PDF of at most 10 MB and base64-encodes it for the API.
+Only accepted when the country is booked as e-invoicing (`422` otherwise).
+
+```php
+$tx = $client->eReporting()->createTransaction(
+    /* … as above … */
+    invoicePdf: '/var/invoices/NO-2026-0001.pdf',  // or file_get_contents(...), or base64
+    invoicePdfFilename: 'NO-2026-0001.pdf',        // optional, max 120 chars (defaults to the file's basename)
+);
+
+$tx->invoicePdf?->filename;   // NO-2026-0001.pdf
+$tx->invoicePdf?->size;       // bytes
+$tx->invoicePdf?->attached;   // true once it was uploaded together with the e-invoice
+```
+
+#### 6. Buyer not on Peppol: `not_required`
+
+Before sending, Taxora checks the Peppol directory. If the buyer **cannot receive
+e-invoices**, nothing is sent and nothing is billed: the transaction ends in state
+`not_required` (`ComplianceTransactionState::NOT_REQUIRED`, terminal) — send your
+regular invoice instead. If the directory cannot answer yet, the transaction stays
+`pending` and Taxora asks again automatically. In both cases `deliveryCheck` tells you why:
+
+```php
+use Taxora\Sdk\Enums\ComplianceTransactionState;
+use Taxora\Sdk\Enums\PeppolLookupStatus;
+
+$tx = $client->eReporting()->getTransaction($tx->id);
+
+if ($tx->isNotRequired()) {                                   // state === NOT_REQUIRED
+    // $tx->deliveryCheck->status === PeppolLookupStatus::NOT_REACHABLE
+    sendRegularInvoice($tx->invoiceNumber);
+} elseif ($tx->deliveryCheck?->status === PeppolLookupStatus::PENDING) {
+    // still waiting for the directory — checked again automatically
+}
+
+// Filter for them:
+$held = $client->eReporting()->listTransactions(state: ComplianceTransactionState::NOT_REQUIRED, country: 'NO');
+```
+
+#### 7. Download the legal e-invoice
+
+Once a transaction is `submitted`, `documentUrl` is set and the legal document
+(usually EHF / Peppol UBL XML) can be downloaded — exactly as it was sent to the
+buyer. Taxora keeps an archived copy, so it stays available.
+
+```php
+if ($tx->hasDocument()) {
+    $doc = $client->eReporting()->getTransactionDocument($tx->id);
+    $doc->contentType;                  // e.g. application/xml
+    $doc->filename;                     // from Content-Disposition (path parts stripped)
+    $doc->saveTo('/archive/' . $doc->filename);
+}
+```
+
+Not sent yet, or the provider is still preparing the document → `HttpException` with
+status `409`; try again in a few minutes.
+
+### 🛒 Self-service plans (checkout)
+
+Book a compliance plan without talking to sales. These calls work **without** an
+active compliance service — they exist for companies that do not have it yet.
+
+```php
+$offerings = $client->eReporting()->getOfferings();
+
+$no = $offerings->forCountry('NO');            // ComplianceOffering|null
+foreach ($no?->plans ?? [] as $plan) {
+    echo $plan->key . ': ' . $plan->monthlyFee . ' EUR/month + ' . $plan->setupFee . ' setup'
+        . ($plan->checkoutAvailable ? '' : ' (not bookable right now)') . PHP_EOL;
+}
+$offerings->coverage;                          // every country Taxora reaches (bookable / on_request)
+$offerings->hasAccess('FR', 'e_reporting');    // what is already unlocked, per country
+
+// 1. Start a Stripe checkout and send the buyer to $session->url
+$session = $client->eReporting()->createCheckout(country: 'NO', plan: 'standard');
+
+// 2. After payment Stripe redirects to the Taxora portal (…?session_id=cs_…).
+//    Confirm to activate right away (the payment webhook activates it too; idempotent):
+$state = $client->eReporting()->confirmCheckout($session->id);
+$state->active;                                // true once paid
+
+// Invoices, payment method, cancellation — a short-lived Stripe billing portal link:
+$url = $client->eReporting()->createBillingPortalSession();   // 404 HttpException when no plan was bought via Stripe
+```
+
+Unknown or contact-only plans, unmet prerequisites (e.g. Norway's plan requires
+France e-reporting) and an already active plan answer `422` (`ValidationException`).
+
+### 💶 Usage summaries (billing)
+
+Read-only transparency over what is billed per feature and billing period
+(e-reporting / e-invoicing transactions, Smart Enrichment checks):
+
+```php
+$page = $client->billing()->listUsageSummaries(page: 1, perPage: 25);   // newest period first
+foreach ($page as $summary) {
+    echo $summary->billingPeriod . ' ' . $summary->feature . ': '
+        . $summary->eventCount . ' events, ' . ($summary->billableAmount ?? '–') . PHP_EOL;
+}
+
+// One period (YYYY-MM) with its individual usage events — 404 HttpException when there was no usage:
+foreach ($client->billing()->getUsageSummaries('2026-09') as $summary) {
+    foreach ($summary->events as $event) {
+        echo $event->resourceType . ' #' . $event->resourceId . PHP_EOL;   // e.g. compliance_transaction #88
+    }
+}
+```
+
 `company()->get()` returns the raw company payload. New company limit fields are exposed as `api_rate_limit` and `vat_rate_limit`. The legacy `rate_limit` field may still appear temporarily for backward compatibility, but it should be treated as deprecated.
 
 `vat()->validate()` returns a `VatResource` object that includes the canonical VAT number, status, requested company name echo, optional scoring data, and optional API error metadata. `state` remains backward-compatible and still carries the canonical business result, while `has_api_error`, `error_message`, and `next_api_recheck_at` expose technical provider failures without breaking existing integrations. The `score` reflects the overall confidence (higher is better), while `breakdown` provides an array of `ScoreBreakdown` objects describing every validation step, its score contribution, and any metadata (e.g. matched addresses or mismatched fields).
@@ -643,6 +776,30 @@ http_response_code(200);
 - `WebhookSignature::generateHeader($rawBody, $secret)` builds a valid header for testing your own handler.
 - Dedupe on `$event['id']` (= `Taxora-Webhook-Id`), which stays the same across retries.
 
+**Event types.** `WebhookEventType` lists every event name (`vat.validated`, `vat.state_changed`,
+`compliance.transaction.state_changed`, `compliance.ledger.state_changed`, `enrichment.completed`,
+`enrichment.updated`, `webhook.test`). The two compliance events have typed payload objects:
+
+```php
+use Taxora\Sdk\Webhooks\ComplianceLedgerStateChangedEvent;
+use Taxora\Sdk\Webhooks\ComplianceTransactionStateChangedEvent;
+use Taxora\Sdk\Webhooks\WebhookEventType;
+
+switch (WebhookEventType::tryFrom($event['event'])) {
+    case WebhookEventType::COMPLIANCE_TRANSACTION_STATE_CHANGED:
+        $tx = ComplianceTransactionStateChangedEvent::fromEvent($event);
+        // $tx->transactionId, $tx->state (ComplianceTransactionState), $tx->providerState (sent, error, accepted, …),
+        // $tx->country, $tx->invoiceNumber — fetch the full transaction with getTransaction($tx->transactionId)
+        break;
+    case WebhookEventType::COMPLIANCE_LEDGER_STATE_CHANGED:
+        $ledger = ComplianceLedgerStateChangedEvent::fromEvent($event);
+        // $ledger->ledgerId, $ledger->state (e.g. registered, refused), $ledger->ledgerType, $ledger->ledgerDate
+        break;
+    default:
+        // other / future events: ignore or handle the raw array
+}
+```
+
 ---
 
 ## 🧩 Architecture
@@ -653,7 +810,10 @@ The SDK follows clean separation of concerns:
 TaxoraClient
  ├── auth()     → AuthEndpoint     (login, refresh)
  ├── company()  → CompanyEndpoint  (company info)
- └── vat()      → VatEndpoint      (validate, history, search, certificate)
+ ├── vat()      → VatEndpoint      (validate, history, search, certificate)
+ ├── smartEnrichment() → SmartEnrichmentEndpoint (reverse VAT lookup)
+ ├── eReporting()      → EReportingEndpoint      (e-reporting / e-invoicing, self-service plans)
+ └── billing()         → BillingEndpoint         (usage summaries)
 ```
 
 Each endpoint handles:
@@ -679,6 +839,11 @@ Each endpoint handles:
 | `RegistryCompany` | Norwegian register (Brønnøysund) company data from `registryLookup()`                                     |
 | `PeppolLookupResult` | Peppol directory answer (`status` reachable / not_reachable / pending, supported document types)      |
 | `RevenueStatistics` | Aggregated turnover statistics over compliance transactions                                            |
+| `ComplianceDeliveryCheck` / `ComplianceInvoicePdf` | E-invoicing delivery details on a transaction (`deliveryCheck`, `invoicePdf`) |
+| `ComplianceTransactionDocument` | Legal e-invoice download (`content`, `contentType`, `filename`, `saveTo()`)               |
+| `ComplianceOfferings` | Self-service plans per country, coverage and access flags (`getOfferings()`)                         |
+| `ComplianceCheckoutSession` / `ComplianceSubscriptionState` | Checkout start (`id`, `url`) and confirmation (`active`, `plan`, …) |
+| `UsageSummary` / `UsageSummaryPage` | Billed usage per feature and period, with `UsageEvent`s for a single period            |
 | `SmartEnrichmentJob` | Smart Enrichment (reverse VAT lookup) job with its results                                            |
 | `LocalTaxNumberRow` | One company of the local tax numbers report (`taxNumber`, `taxNumberName`, `taxNumberSource`, `vatStatus`) |
 | `LocalTaxNumberSummary` | `companies` / `withTaxNumber` counts of the local tax numbers report                              |
@@ -783,6 +948,10 @@ $client = new TaxoraClient(..., environment: Environment::PRODUCTION);
 | `AuthenticationException` | HTTP 401 — credentials rejected, or the token refresh failed          |
 | `HttpException`           | Every other non-success status — `getStatusCode()` / `getResponseBody()` |
 | `TimeoutException`        | A client-side wait gave up; the server-side job keeps running          |
+
+Compliance write calls (create / update / delete / submit / import transactions, enrollments)
+by a user whose only role is **read-only** answer `403` with body code `read_only_role`
+(`HttpException`; read it from `getResponseBody()`) — ask an admin of the company to make the change.
 
 **Exception messages are always short and safe to log.** A response body is
 never used as the message: gateways in front of the API answer `502`/`503`/`504`

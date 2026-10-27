@@ -15,12 +15,16 @@ use Taxora\Sdk\Enums\ComplianceTransactionType;
  * The trailing fields (buyer register id/address, document type, credit-note
  * reference, provider state, invoice lines) were added with e-invoicing
  * (Norway / Peppol) and default to null / [] when an older server omits them.
+ * So do $documentUrl, $deliveryCheck and $invoicePdf (e-invoicing delivery).
  */
 final readonly class ComplianceTransaction
 {
     /**
      * @param string|null $providerState latest provider-side delivery state (e.g. sent, accepted, refused, paid) — richer than $state for e-invoicing
      * @param list<array<string,mixed>> $invoiceLines the stored invoice lines in wire shape (invoice_lines_attributes / taxes_attributes)
+     * @param string|null $documentUrl e-invoicing: where to download the legal e-invoice once it was sent (API-key auth) — see EReportingEndpoint::getTransactionDocument()
+     * @param ComplianceDeliveryCheck|null $deliveryCheck e-invoicing: the Peppol directory answer when it held the invoice back (state not_required or pending)
+     * @param ComplianceInvoicePdf|null $invoicePdf e-invoicing: the seller's own PDF sent along with the e-invoice
      */
     public function __construct(
         public int $id,
@@ -61,6 +65,9 @@ final readonly class ComplianceTransaction
         public ?string $amendedDate = null,
         public ?string $providerState = null,
         public array $invoiceLines = [],
+        public ?string $documentUrl = null,
+        public ?ComplianceDeliveryCheck $deliveryCheck = null,
+        public ?ComplianceInvoicePdf $invoicePdf = null,
     ) {
     }
 
@@ -106,6 +113,9 @@ final readonly class ComplianceTransaction
             amendedDate: isset($data['amended_date']) ? (string) $data['amended_date'] : null,
             providerState: isset($data['provider_state']) ? (string) $data['provider_state'] : null,
             invoiceLines: self::invoiceLinesOf($data),
+            documentUrl: isset($data['document_url']) && $data['document_url'] !== '' ? (string) $data['document_url'] : null,
+            deliveryCheck: is_array($data['delivery_check'] ?? null) ? ComplianceDeliveryCheck::fromArray($data['delivery_check']) : null,
+            invoicePdf: is_array($data['invoice_pdf'] ?? null) ? ComplianceInvoicePdf::fromArray($data['invoice_pdf']) : null,
         );
     }
 
@@ -113,6 +123,18 @@ final readonly class ComplianceTransaction
     public function isCreditNote(): bool
     {
         return $this->documentType === ComplianceDocumentType::CREDIT_NOTE;
+    }
+
+    /** E-invoicing: the legal e-invoice can be downloaded (getTransactionDocument()). */
+    public function hasDocument(): bool
+    {
+        return $this->documentUrl !== null;
+    }
+
+    /** E-invoicing: the buyer is not on the e-invoicing network, so no e-invoice was sent or billed. */
+    public function isNotRequired(): bool
+    {
+        return $this->state === ComplianceTransactionState::NOT_REQUIRED;
     }
 
     /**

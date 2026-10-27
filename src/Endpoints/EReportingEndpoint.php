@@ -26,13 +26,17 @@ use Taxora\Sdk\Http\AuthMiddleware;
 use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
 use Taxora\Sdk\Support\NorwegianOrgNumber;
+use Taxora\Sdk\ValueObjects\ComplianceCheckoutSession;
 use Taxora\Sdk\ValueObjects\ComplianceEnrollment;
 use Taxora\Sdk\ValueObjects\ComplianceEnrollmentPage;
 use Taxora\Sdk\ValueObjects\ComplianceImportResult;
 use Taxora\Sdk\ValueObjects\ComplianceInvoiceLine;
+use Taxora\Sdk\ValueObjects\ComplianceOfferings;
+use Taxora\Sdk\ValueObjects\ComplianceSubscriptionState;
 use Taxora\Sdk\ValueObjects\ComplianceTaxReport;
 use Taxora\Sdk\ValueObjects\ComplianceTaxReportPage;
 use Taxora\Sdk\ValueObjects\ComplianceTransaction;
+use Taxora\Sdk\ValueObjects\ComplianceTransactionDocument;
 use Taxora\Sdk\ValueObjects\ComplianceTransactionPage;
 use Taxora\Sdk\ValueObjects\ComplianceVatRates;
 use Taxora\Sdk\ValueObjects\PeppolLookupResult;
@@ -61,8 +65,11 @@ use Throwable;
  *   $peppol     = $client->eReporting()->peppolLookup('NO', $buyerOrgNumber);
  *   $tx         = $client->eReporting()->createTransaction(..., counterpartyRegisterId: $buyerOrgNumber);
  *
- * All endpoints except {@see requestEReportingAccess()} require an active
- * e-reporting or e-invoicing feature grant / subscription (403 otherwise).
+ * All endpoints except {@see requestEReportingAccess()} and the self-service
+ * checkout calls require an active e-reporting or e-invoicing feature grant /
+ * subscription (403 otherwise). Write calls (create / update / delete / submit /
+ * import) by a user whose only role is read-only also get a 403
+ * {@see HttpException}, body code "read_only_role".
  */
 final class EReportingEndpoint
 {
@@ -78,10 +85,14 @@ final class EReportingEndpoint
         'crossborder_outbound',
         'crossborder_inbound',
     ];
-    private const TRANSACTION_STATES = ['pending', 'sending', 'submitted', 'error'];
+    private const TRANSACTION_STATES = ['pending', 'sending', 'submitted', 'error', 'not_required'];
     private const SERVICES = ['e_reporting', 'e_invoicing'];
     /** Countries served by registryLookup() / peppolLookup(). */
     private const LOOKUP_COUNTRIES = ['NO'];
+    /** Server limit for invoice_pdf (some e-invoicing networks cap attachments at 10 MB). */
+    private const INVOICE_PDF_MAX_BYTES = 10 * 1024 * 1024;
+    /** Content types of the legal document → file extension for the fallback filename. */
+    private const DOCUMENT_EXTENSIONS = ['xml' => 'xml', 'pdf' => 'pdf', 'json' => 'json'];
 
     private readonly Closure $refreshCallback;
 
@@ -419,6 +430,13 @@ final class EReportingEndpoint
      * @param list<ComplianceInvoiceLine> $invoiceLines at least one line, each with at least one tax
      * @param string|null $counterpartyRegisterId buyer's company register id (Norway: 9-digit organisation number, check digit validated)
      * @param string|null $extraInfo free-text invoice note (max 1000 characters); mandatory Norwegian notes are added server-side
+     * @param string|null $invoicePdf e-invoicing only: your own invoice PDF, sent along as the e-invoice's visual
+     *                                representation — a file path, the raw PDF bytes or an already base64-encoded PDF
+     *                                (max 10 MB); the SDK base64-encodes it for the API. Only accepted when the
+     *                                country is booked as e-invoicing (422 otherwise). Read the outcome from
+     *                                {@see ComplianceTransaction::$invoicePdf}.
+     * @param string|null $invoicePdfFilename file name shown to the buyer (max 120 characters); defaults to the
+     *                                        file's basename when $invoicePdf is a path, else server-side to the invoice number
      */
     public function createTransaction(
         int $enrollmentId,
@@ -450,6 +468,8 @@ final class EReportingEndpoint
         ?string $amendedNumber = null,
         DateTimeInterface|string|null $amendedDate = null,
         ?string $extraInfo = null,
+        ?string $invoicePdf = null,
+        ?string $invoicePdfFilename = null,
     ): ComplianceTransaction {
         $this->assertPositiveId($enrollmentId, 'enrollmentId');
         $type = $this->enumValue($transactionType, self::TRANSACTION_TYPES, 'transactionType');
@@ -499,7 +519,7 @@ final class EReportingEndpoint
             'payment_method_text' => $paymentMethodText,
             'payment_terms' => $paymentTerms,
             'submit_now' => $submitNow,
-        ], static fn ($v) => $v !== null) + $invoiceFields;
+        ], static fn ($v) => $v !== null) + $invoiceFields + $this->invoicePdfFields($invoicePdf, $invoicePdfFilename);
 
         $payload = $this->jsonPost($this->uri('/compliance/transactions'), $body);
 
@@ -567,7 +587,8 @@ final class EReportingEndpoint
      * through this method.
      *
      * The e-invoicing fields ($counterpartyRegisterId … $extraInfo) behave as in
-     * {@see createTransaction()}; they are merged into the stored ones.
+     * {@see createTransaction()}; they are merged into the stored ones. $invoicePdf
+     * (path, raw bytes or base64) replaces a PDF that is still waiting to be sent.
      *
      * @param list<ComplianceInvoiceLine>|null $invoiceLines when provided, replaces all invoice lines
      */
@@ -600,6 +621,8 @@ final class EReportingEndpoint
         ?string $amendedNumber = null,
         DateTimeInterface|string|null $amendedDate = null,
         ?string $extraInfo = null,
+        ?string $invoicePdf = null,
+        ?string $invoicePdfFilename = null,
     ): ComplianceTransaction {
         $this->assertPositiveId($id, 'id');
         if ($invoiceNumber !== null) {
@@ -648,7 +671,7 @@ final class EReportingEndpoint
             $amendedNumber,
             $amendedDate,
             $extraInfo,
-        );
+        ) + $this->invoicePdfFields($invoicePdf, $invoicePdfFilename);
 
         if ($body === []) {
             throw new InvalidArgumentException('updateTransaction requires at least one field to update.');
@@ -699,6 +722,36 @@ final class EReportingEndpoint
         $payload = $this->jsonPost($this->uri('/compliance/transactions/' . $id . '/submit'), []);
 
         return ComplianceTransaction::fromArray($this->extractData($payload));
+    }
+
+    /**
+     * Download the legal e-invoice of a transaction (e-invoicing only) — the
+     * structured document (e.g. EHF / Peppol UBL XML) exactly as it was sent to
+     * the buyer. Available once the transaction is submitted
+     * ({@see ComplianceTransaction::hasDocument()}); Taxora keeps an archived
+     * copy, so it stays downloadable.
+     *
+     * Not sent yet, or the provider is still preparing the document: an
+     * {@see HttpException} with status 409 — try again in a few minutes. 404 when
+     * the transaction does not exist, 502 on a provider error.
+     */
+    public function getTransactionDocument(int $id): ComplianceTransactionDocument
+    {
+        $this->assertPositiveId($id, 'id');
+
+        $uri = $this->uri('/compliance/transactions/' . $id . '/document');
+        $response = $this->rawGet($uri, 'application/xml, application/pdf, application/octet-stream, application/json', 'e-invoice document download');
+
+        $contentType = trim($response->getHeaderLine('Content-Type'));
+        if ($contentType === '') {
+            $contentType = 'application/octet-stream';
+        }
+
+        return new ComplianceTransactionDocument(
+            content: (string) $response->getBody(),
+            contentType: $contentType,
+            filename: $this->filenameFrom($response) ?? sprintf('e-invoice-%d.%s', $id, $this->extensionFor($contentType)),
+        );
     }
 
     /**
@@ -769,16 +822,23 @@ final class EReportingEndpoint
      * $state is passed through as-is (the server accepts any string filter),
      * so states added in future API versions can be filtered without an SDK
      * update — {@see ComplianceTaxReportState} covers the currently known ones.
+     * $country (ISO alpha-2, any case) limits the list to one country.
      */
     public function listTaxReports(
         int $page = 1,
         int $perPage = 25,
         ComplianceTaxReportState|string|null $state = null,
+        ?string $country = null,
     ): ComplianceTaxReportPage {
+        if ($country !== null) {
+            $this->assertCountryCode($country, 'country');
+        }
+
         $uri = $this->uri('/compliance/tax-reports' . $this->buildQuery([
             'page' => (string) $page,
             'per_page' => (string) $perPage,
             'state' => $state instanceof ComplianceTaxReportState ? $state->value : $state,
+            'country' => $country !== null ? strtoupper($country) : null,
         ]));
 
         return ComplianceTaxReportPage::fromArray($this->extractData($this->jsonGet($uri)));
@@ -819,6 +879,7 @@ final class EReportingEndpoint
      * @param  string|null  $interval  Time-series bucket size: "day", "week" or "month" (default "month").
      * @param  ComplianceTransactionType|string|null  $transactionType  Optional filter, e.g. "b2c_outbound".
      * @param  ComplianceTransactionState|string|null  $state  Optional filter, e.g. "submitted".
+     * @param  int|null  $complianceEnrollmentId  Optional: only this enrollment (= one country), e.g. France without Norway.
      */
     public function getRevenueStatistics(
         DateTimeInterface|string|null $dateFrom = null,
@@ -826,7 +887,11 @@ final class EReportingEndpoint
         ?string $interval = null,
         ComplianceTransactionType|string|null $transactionType = null,
         ComplianceTransactionState|string|null $state = null,
+        ?int $complianceEnrollmentId = null,
     ): RevenueStatistics {
+        if ($complianceEnrollmentId !== null) {
+            $this->assertPositiveId($complianceEnrollmentId, 'complianceEnrollmentId');
+        }
         if ($interval !== null && !in_array($interval, self::INTERVALS, true)) {
             throw new InvalidArgumentException(sprintf(
                 'interval must be one of "%s", got "%s".',
@@ -843,11 +908,119 @@ final class EReportingEndpoint
                 ? $this->enumValue($transactionType, self::TRANSACTION_TYPES, 'transactionType')
                 : null,
             'state' => $state !== null ? $this->enumValue($state, self::TRANSACTION_STATES, 'state') : null,
+            'compliance_enrollment_id' => $complianceEnrollmentId !== null ? (string) $complianceEnrollmentId : null,
         ]));
 
         $payload = $this->jsonGet($uri);
 
         return RevenueStatistics::fromArray($this->extractData($payload));
+    }
+
+    /**
+     * Net and VAT per month, currency and tax rate as a semicolon-separated CSV
+     * (columns: month;currency;tax_category;tax_rate_percent;lines;net;vat;gross),
+     * computed from the invoice lines — for reconciling the reported figures with
+     * your VAT return. Same filters as {@see getRevenueStatistics()} (without
+     * interval, plus $complianceEnrollmentId for one country); $dateFrom defaults
+     * server-side to one year before $dateTo, which defaults to today.
+     *
+     * @return string the raw CSV bytes, returned exactly as sent (a BOM, if any, is kept)
+     */
+    public function exportRevenueTaxRatesCsv(
+        DateTimeInterface|string|null $dateFrom = null,
+        DateTimeInterface|string|null $dateTo = null,
+        ComplianceTransactionType|string|null $transactionType = null,
+        ComplianceTransactionState|string|null $state = null,
+        ?int $complianceEnrollmentId = null,
+    ): string {
+        if ($complianceEnrollmentId !== null) {
+            $this->assertPositiveId($complianceEnrollmentId, 'complianceEnrollmentId');
+        }
+        $uri = $this->uri('/compliance/revenue-statistics/tax-rates.csv' . $this->buildQuery([
+            'date_from' => $dateFrom !== null ? $this->formatDate($dateFrom) : null,
+            'date_to' => $dateTo !== null ? $this->formatDate($dateTo) : null,
+            'transaction_type' => $transactionType !== null
+                ? $this->enumValue($transactionType, self::TRANSACTION_TYPES, 'transactionType')
+                : null,
+            'state' => $state !== null ? $this->enumValue($state, self::TRANSACTION_STATES, 'state') : null,
+            'compliance_enrollment_id' => $complianceEnrollmentId !== null ? (string) $complianceEnrollmentId : null,
+        ]));
+
+        return (string) $this->rawGet($uri, 'text/csv, application/json', 'tax rates CSV export')->getBody();
+    }
+
+    // ---------------------------------------------------------------------
+    // Self-service plans (checkout)
+    // ---------------------------------------------------------------------
+
+    /**
+     * Bookable compliance plans per country with prices and the company's
+     * current state, every country Taxora reaches ({@see ComplianceOfferings::$coverage})
+     * and which services are unlocked — company-wide and per country. Like the
+     * other self-service calls this works WITHOUT an active compliance service.
+     */
+    public function getOfferings(): ComplianceOfferings
+    {
+        return ComplianceOfferings::fromArray($this->jsonGet($this->uri('/compliance/offerings')));
+    }
+
+    /**
+     * Start a Stripe checkout for a compliance plan ($plan = a plan key from
+     * {@see getOfferings()}, e.g. "standard") and send the buyer to the returned
+     * URL. After payment Stripe redirects to the Taxora portal; call
+     * {@see confirmCheckout()} with the session id to activate the plan right
+     * away (the payment webhook activates it as well).
+     *
+     * Unknown / contact-only plans, unmet prerequisites and an already active
+     * plan for the country yield a {@see HttpException} with status 422; Stripe
+     * errors a 502. Not retried — a retry could open a second checkout.
+     */
+    public function createCheckout(string $country, string $plan): ComplianceCheckoutSession
+    {
+        $this->assertCountryCode($country, 'country');
+        if (trim($plan) === '') {
+            throw new InvalidArgumentException('plan must not be empty.');
+        }
+        $this->assertMaxLength($plan, 30, 'plan');
+
+        $payload = $this->jsonPost($this->uri('/compliance/checkout'), [
+            'country' => strtoupper($country),
+            'plan' => $plan,
+        ], [200, 201]);
+
+        return ComplianceCheckoutSession::fromArray($this->extractData($payload));
+    }
+
+    /**
+     * Confirm a finished checkout and activate its plan (idempotent). Unknown,
+     * foreign or unpaid sessions return active = false with null details.
+     */
+    public function confirmCheckout(string $sessionId): ComplianceSubscriptionState
+    {
+        if (trim($sessionId) === '') {
+            throw new InvalidArgumentException('sessionId must not be empty.');
+        }
+        $this->assertMaxLength($sessionId, 255, 'sessionId');
+
+        $payload = $this->jsonPost($this->uri('/compliance/checkout/confirm'), ['session_id' => $sessionId], [200]);
+
+        return ComplianceSubscriptionState::fromArray($this->extractData($payload));
+    }
+
+    /**
+     * URL of a Stripe billing portal session for the company's self-service
+     * plans (invoices, payment method, cancellation). Short-lived — open it
+     * right away. 404 ({@see HttpException}) when no plan was bought via Stripe.
+     */
+    public function createBillingPortalSession(): string
+    {
+        $data = $this->extractData($this->jsonPost($this->uri('/compliance/billing-portal'), [], [200]));
+        $url = isset($data['url']) ? trim((string) $data['url']) : '';
+        if ($url === '') {
+            throw new HttpException('Billing portal response is missing url.', 200, (string) json_encode($data));
+        }
+
+        return $url;
     }
 
     // ---------------------------------------------------------------------
@@ -1067,6 +1240,96 @@ final class EReportingEndpoint
     }
 
     /**
+     * invoice_pdf (+ invoice_pdf_filename) as the API expects them: the PDF
+     * base64-encoded. $pdf may be a file path, the raw PDF bytes or an already
+     * base64-encoded PDF (optionally as a data:application/pdf;base64, URI).
+     *
+     * @return array<string,string>
+     */
+    private function invoicePdfFields(?string $pdf, ?string $filename): array
+    {
+        if ($filename !== null) {
+            $filename = trim($filename);
+            if ($filename === '') {
+                throw new InvalidArgumentException('invoicePdfFilename must not be empty.');
+            }
+            $this->assertMaxLength($filename, 120, 'invoicePdfFilename');
+            if ($pdf === null) {
+                throw new InvalidArgumentException('invoicePdfFilename requires invoicePdf.');
+            }
+        }
+        if ($pdf === null) {
+            return [];
+        }
+
+        $bytes = $this->invoicePdfBytes($pdf, $filename);
+
+        if (!str_starts_with($bytes, '%PDF-')) {
+            throw new InvalidArgumentException('invoicePdf must be a PDF (a file path, the raw bytes or base64).');
+        }
+        if (strlen($bytes) > self::INVOICE_PDF_MAX_BYTES) {
+            throw new InvalidArgumentException('invoicePdf must not exceed 10 MB.');
+        }
+
+        return array_filter([
+            'invoice_pdf' => base64_encode($bytes),
+            'invoice_pdf_filename' => $filename,
+        ], static fn ($v) => $v !== null);
+    }
+
+    /** Resolve the invoicePdf argument to raw bytes; a path also defaults the filename. */
+    private function invoicePdfBytes(string $pdf, ?string &$filename): string
+    {
+        if (str_starts_with($pdf, '%PDF-')) {
+            return $pdf;
+        }
+
+        $base64 = preg_replace('#^data:application/pdf;base64,#i', '', trim($pdf));
+        if ($base64 !== null && $base64 !== trim($pdf)) {
+            $decoded = base64_decode($base64, true);
+
+            return $decoded === false ? '' : $decoded;
+        }
+
+        if (strlen($pdf) < 4096 && !str_contains($pdf, "\0") && is_file($pdf)) {
+            if (!is_readable($pdf)) {
+                throw new InvalidArgumentException(sprintf('invoicePdf file "%s" is not readable.', $pdf));
+            }
+            $bytes = file_get_contents($pdf);
+            if ($bytes === false) {
+                throw new InvalidArgumentException(sprintf('invoicePdf file "%s" could not be read.', $pdf));
+            }
+            if ($filename === null) {
+                $basename = basename($pdf);
+                $filename = $basename !== '' ? $this->truncateFilename($basename) : null;
+            }
+
+            return $bytes;
+        }
+
+        $decoded = base64_decode(trim($pdf), true);
+        if ($decoded === false) {
+            throw new InvalidArgumentException('invoicePdf must be a readable file path, the raw PDF bytes or base64.');
+        }
+
+        return $decoded;
+    }
+
+    /** Keep a defaulted basename within the server's 120-character limit (extension preserved). */
+    private function truncateFilename(string $filename): string
+    {
+        $length = preg_match_all('/./su', $filename);
+        if ($length === false || $length <= 120) {
+            return $filename;
+        }
+        $extension = pathinfo($filename, PATHINFO_EXTENSION);
+        $suffix = $extension !== '' ? '.' . $extension : '';
+        $stem = (string) preg_replace('/^(.{0,' . (120 - strlen($suffix)) . '}).*$/su', '$1', $filename);
+
+        return $stem . $suffix;
+    }
+
+    /**
      * @param array<mixed> $invoiceLines
      * @return list<array<string,mixed>>
      */
@@ -1165,6 +1428,62 @@ final class EReportingEndpoint
         $this->assertSuccessful($payload, $code, $body);
 
         return $payload;
+    }
+
+    /**
+     * GET of a non-JSON download (CSV, XML, PDF): same auth/401-refresh flow, a
+     * 422 becomes a {@see ValidationException}; read-only, so retried on a
+     * transient gateway failure (see RetryPolicy).
+     */
+    private function rawGet(string $uri, string $accept, string $operation): ResponseInterface
+    {
+        /** @var ResponseInterface */
+        return $this->withRetries($operation, function () use ($uri, $accept): ResponseInterface {
+            $response = $this->send(fn () => $this->req->createRequest('GET', $uri)->withHeader('Accept', $accept));
+            $code = $response->getStatusCode();
+
+            if ($code === 422) {
+                throw ValidationException::fromResponseBody((string) $response->getBody());
+            }
+            if ($code !== 200) {
+                throw HttpException::fromResponse($code, (string) $response->getBody(), retryAfter: $this->retryAfterOf($response));
+            }
+
+            return $response;
+        });
+    }
+
+    /** The filename of a Content-Disposition header (RFC 6266 filename* preferred), or null. */
+    private function filenameFrom(ResponseInterface $response): ?string
+    {
+        $header = $response->getHeaderLine('Content-Disposition');
+        if ($header === '') {
+            return null;
+        }
+
+        if (preg_match("/filename\\*\\s*=\\s*(?:UTF-8|ISO-8859-1)?''([^;]+)/i", $header, $m) === 1) {
+            $name = rawurldecode(trim($m[1], " \t\""));
+        } elseif (preg_match('/filename\\s*=\\s*"([^"]*)"/i', $header, $m) === 1 || preg_match('/filename\\s*=\\s*([^;]+)/i', $header, $m) === 1) {
+            $name = trim($m[1]);
+        } else {
+            return null;
+        }
+
+        // Never let a header steer where the caller writes the file.
+        $name = basename(str_replace('\\', '/', $name));
+
+        return $name !== '' && $name !== '.' && $name !== '..' ? $name : null;
+    }
+
+    private function extensionFor(string $contentType): string
+    {
+        foreach (self::DOCUMENT_EXTENSIONS as $needle => $extension) {
+            if (stripos($contentType, $needle) !== false) {
+                return $extension;
+            }
+        }
+
+        return 'bin';
     }
 
     /**

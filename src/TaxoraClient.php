@@ -9,6 +9,7 @@ use Psr\Http\Message\RequestFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Taxora\Sdk\Endpoints\AuthEndpoint;
+use Taxora\Sdk\Endpoints\BillingEndpoint;
 use Taxora\Sdk\Endpoints\CompanyEndpoint;
 use Taxora\Sdk\Endpoints\EReportingEndpoint;
 use Taxora\Sdk\Endpoints\SmartEnrichmentEndpoint;
@@ -40,6 +41,7 @@ final class TaxoraClient
     private ?CompanyEndpoint $companyEndpoint = null;
     private ?SmartEnrichmentEndpoint $smartEnrichmentEndpoint = null;
     private ?EReportingEndpoint $eReportingEndpoint = null;
+    private ?BillingEndpoint $billingEndpoint = null;
 
     public function __construct(
         Psr18Client $http,
@@ -167,6 +169,26 @@ final class TaxoraClient
         }
 
         return $this->eReportingEndpoint;
+    }
+
+    /** -------- BILLING (usage summaries) -------- */
+    public function billing(): BillingEndpoint
+    {
+        if ($this->billingEndpoint === null) {
+            $this->billingEndpoint = new BillingEndpoint(
+                $this->http,
+                $this->requestFactory,
+                $this->apiKeyMw,
+                $this->authMw,
+                $this->tokenStore,
+                [$this, 'refresh'],
+                $this->baseUrl,
+                $this->apiVersion,
+                retryPolicy: $this->retryPolicy
+            );
+        }
+
+        return $this->billingEndpoint;
     }
 
     public function auth(): AuthEndpoint

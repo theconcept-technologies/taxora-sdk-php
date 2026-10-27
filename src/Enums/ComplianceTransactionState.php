@@ -13,6 +13,12 @@ enum ComplianceTransactionState: string
     case SENDING = 'sending';
     case SUBMITTED = 'submitted';
     case ERROR = 'error';
+    /**
+     * E-invoicing only: the buyer is not on the e-invoicing network (see the
+     * transaction's deliveryCheck), so no e-invoice was sent and nothing was
+     * billed — send your regular invoice instead.
+     */
+    case NOT_REQUIRED = 'not_required';
     case UNKNOWN = 'unknown';
 
     /** Tolerant mapping: unrecognized values become UNKNOWN instead of throwing. */
@@ -35,7 +41,7 @@ enum ComplianceTransactionState: string
     /** No further transition will happen without another explicit submit. */
     public function isTerminal(): bool
     {
-        return $this === self::SUBMITTED || $this === self::ERROR;
+        return $this === self::SUBMITTED || $this === self::ERROR || $this === self::NOT_REQUIRED;
     }
 
     public function description(): string
@@ -45,6 +51,7 @@ enum ComplianceTransactionState: string
             self::SENDING => 'Submission to the provider in progress',
             self::SUBMITTED => 'Successfully submitted to the provider',
             self::ERROR => 'Submission failed (see submissionError)',
+            self::NOT_REQUIRED => 'The buyer cannot receive e-invoices, so none was sent or billed — send your regular invoice instead',
             self::UNKNOWN => 'Unknown state',
         };
     }
