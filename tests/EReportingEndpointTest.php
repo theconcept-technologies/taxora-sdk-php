@@ -2835,6 +2835,7 @@ final class EReportingEndpointTest extends TestCase
                     'coverage' => [
                         ['country' => 'NO', 'availability' => 'bookable', 'services' => ['e_invoicing'], 'network' => 'peppol', 'format' => 'ehf', 'mandate' => null],
                         ['country' => 'BE', 'availability' => 'on_request', 'services' => ['e_invoicing'], 'network' => 'peppol', 'format' => null, 'mandate' => '2026-01-01'],
+                        ['country' => 'GR', 'availability' => 'on_request', 'services' => ['e_invoicing'], 'network' => 'peppol', 'format' => null, 'mandate' => null, 'support' => 'cross_border_only'],
                     ],
                     'access' => ['e_reporting' => true, 'e_invoicing' => false],
                     'access_by_country' => ['FR' => ['e_reporting' => true, 'e_invoicing' => false], 'NO' => ['e_invoicing' => false]],
@@ -2859,9 +2860,12 @@ final class EReportingEndpointTest extends TestCase
         self::assertSame(199.0, $plan->setupFee);
         self::assertTrue($plan->checkoutAvailable);
         self::assertSame(['country' => 'FR', 'service' => 'e_reporting'], $plan->requires);
-        self::assertCount(2, $offerings->coverage);
+        self::assertCount(3, $offerings->coverage);
         self::assertTrue($offerings->coverage[0]->isBookable());
         self::assertFalse($offerings->coverage[1]->isBookable());
+        self::assertTrue($offerings->coverage[1]->isFullySupported()); // no `support` sent: 'yes'
+        self::assertSame('cross_border_only', $offerings->coverage[2]->support);
+        self::assertFalse($offerings->coverage[2]->isFullySupported());
         self::assertTrue($offerings->eReportingAccess);
         self::assertFalse($offerings->eInvoicingAccess);
         self::assertTrue($offerings->hasAccess('fr', 'e_reporting'));

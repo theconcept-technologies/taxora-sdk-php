@@ -10,7 +10,11 @@ namespace Taxora\Sdk\ValueObjects;
  */
 final readonly class ComplianceCoverageCountry
 {
-    /** @param list<string> $services e.g. ['e_invoicing'] */
+    /**
+     * @param list<string> $services e.g. ['e_invoicing']
+     * @param string $support 'yes', 'cross_border_only' (only invoices across the border are
+     *                        reached) or 'coming_soon' (not live yet, can be requested)
+     */
     public function __construct(
         public string $country,
         public string $availability,
@@ -18,6 +22,7 @@ final readonly class ComplianceCoverageCountry
         public ?string $network,
         public ?string $format,
         public ?string $mandate,
+        public string $support = 'yes',
     ) {
     }
 
@@ -38,11 +43,18 @@ final readonly class ComplianceCoverageCountry
             network: isset($data['network']) ? (string) $data['network'] : null,
             format: isset($data['format']) ? (string) $data['format'] : null,
             mandate: isset($data['mandate']) ? (string) $data['mandate'] : null,
+            support: isset($data['support']) && is_string($data['support']) ? $data['support'] : 'yes',
         );
     }
 
     public function isBookable(): bool
     {
         return $this->availability === 'bookable';
+    }
+
+    /** Fully served (not only cross-border, not "coming soon"). */
+    public function isFullySupported(): bool
+    {
+        return $this->support === 'yes';
     }
 }
