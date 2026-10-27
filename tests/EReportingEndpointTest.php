@@ -1937,6 +1937,53 @@ final class EReportingEndpointTest extends TestCase
         );
     }
 
+    public function testListTransactionsFiltersByProviderState(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [
+                    'data' => [self::transactionPayload([
+                        'provider_state' => 'refused',
+                        'buyer_rejected' => true,
+                        'rejection_reason' => 'Wrong order number',
+                    ])],
+                    'meta' => ['current_page' => 1, 'per_page' => 25, 'total' => 1, 'last_page' => 1],
+                ],
+            ])),
+        ]);
+
+        $page = $this->createEndpoint($http)->listTransactions(providerState: 'refused');
+
+        self::assertSame('provider_state=refused&page=1&per_page=25', $http->requests[0]->getUri()->getQuery());
+        self::assertTrue($page->rows[0]->buyerRejected);
+        self::assertSame('Wrong order number', $page->rows[0]->rejectionReason);
+    }
+
+    public function testListTransactionsRejectsMalformedProviderState(): void
+    {
+        $http = new SequenceHttpClient([]);
+        $endpoint = $this->createEndpoint($http);
+
+        foreach (['Refused', 'not-ok', '', str_repeat('a', 31)] as $value) {
+            try {
+                $endpoint->listTransactions(providerState: $value);
+                self::fail('Expected InvalidArgumentException was not thrown.');
+            } catch (InvalidArgumentException $exception) {
+                self::assertStringContainsString('providerState must be', $exception->getMessage());
+            }
+        }
+        self::assertCount(0, $http->requests);
+    }
+
+    public function testTransactionBuyerRejectionDefaultsWhenAbsent(): void
+    {
+        $tx = ComplianceTransaction::fromArray(self::transactionPayload());
+
+        self::assertFalse($tx->buyerRejected);
+        self::assertNull($tx->rejectionReason);
+    }
+
     public function testListTransactionsRejectsOverlongSearchAndInternalReference(): void
     {
         $http = new SequenceHttpClient([]);

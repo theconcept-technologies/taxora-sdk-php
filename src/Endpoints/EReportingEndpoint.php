@@ -538,7 +538,9 @@ final class EReportingEndpoint
      * optionally filtered by invoice-date range, state, type, enrollment and
      * country (e.g. "NO" to see only Norwegian e-invoices). $search is a
      * contains-match over invoice number, internal reference and buyer name;
-     * $internalReference matches exactly (both max 100 characters). Unlike the other
+     * $internalReference matches exactly (both max 100 characters).
+     * $providerState filters on the provider's delivery state (lowercase, e.g.
+     * "refused" = rejected by the buyer, "accepted", "paid"). Unlike the other
      * list endpoints the server VALIDATES $perPage (1-100) instead of clamping
      * it — out-of-range values yield a {@see ValidationException}.
      */
@@ -553,6 +555,7 @@ final class EReportingEndpoint
         ?string $country = null,
         ?string $search = null,
         ?string $internalReference = null,
+        ?string $providerState = null,
     ): ComplianceTransactionPage {
         if ($complianceEnrollmentId !== null) {
             $this->assertPositiveId($complianceEnrollmentId, 'complianceEnrollmentId');
@@ -566,6 +569,9 @@ final class EReportingEndpoint
         if ($internalReference !== null) {
             $this->assertMaxLength($internalReference, 100, 'internalReference');
         }
+        if ($providerState !== null && preg_match('/^[a-z_]{1,30}$/', $providerState) !== 1) {
+            throw new InvalidArgumentException('providerState must be 1-30 lowercase letters or underscores (e.g. "refused").');
+        }
 
         $uri = $this->uri('/compliance/transactions' . $this->buildQuery([
             'date_from' => $dateFrom !== null ? $this->formatDate($dateFrom) : null,
@@ -578,6 +584,7 @@ final class EReportingEndpoint
             'country' => $country !== null ? strtoupper($country) : null,
             'search' => $search,
             'internal_reference' => $internalReference,
+            'provider_state' => $providerState,
             'page' => (string) $page,
             'per_page' => (string) $perPage,
         ]));

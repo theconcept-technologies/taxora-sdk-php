@@ -16,7 +16,7 @@ use Taxora\Sdk\Enums\ComplianceTransactionType;
  * reference, provider state, invoice lines) were added with e-invoicing
  * (Norway / Peppol) and default to null / [] when an older server omits them.
  * So do $documentUrl, $deliveryCheck and $invoicePdf (e-invoicing delivery),
- * and $internalReference / $pdfUrl.
+ * and $internalReference / $pdfUrl / $buyerRejected / $rejectionReason.
  */
 final readonly class ComplianceTransaction
 {
@@ -28,6 +28,8 @@ final readonly class ComplianceTransaction
      * @param ComplianceInvoicePdf|null $invoicePdf e-invoicing: the seller's own PDF sent along with the e-invoice
      * @param string|null $internalReference your own reference (order number, ERP id) for searching — never sent to the buyer or the tax authority
      * @param string|null $pdfUrl where to download the invoice as a readable PDF (the attached seller PDF or the provider's rendering of the e-invoice; API-key auth) — see EReportingEndpoint::getTransactionPdf(); null while none is available
+     * @param bool $buyerRejected e-invoicing: the buyer refused the invoice (provider state refused) — correct it with a credit note
+     * @param string|null $rejectionReason e-invoicing: the buyer's reason for the rejection, when given
      */
     public function __construct(
         public int $id,
@@ -73,6 +75,8 @@ final readonly class ComplianceTransaction
         public ?ComplianceInvoicePdf $invoicePdf = null,
         public ?string $internalReference = null,
         public ?string $pdfUrl = null,
+        public bool $buyerRejected = false,
+        public ?string $rejectionReason = null,
     ) {
     }
 
@@ -123,6 +127,8 @@ final readonly class ComplianceTransaction
             invoicePdf: is_array($data['invoice_pdf'] ?? null) ? ComplianceInvoicePdf::fromArray($data['invoice_pdf']) : null,
             internalReference: isset($data['internal_reference']) ? (string) $data['internal_reference'] : null,
             pdfUrl: isset($data['pdf_url']) && $data['pdf_url'] !== '' ? (string) $data['pdf_url'] : null,
+            buyerRejected: (bool) ($data['buyer_rejected'] ?? false),
+            rejectionReason: isset($data['rejection_reason']) ? (string) $data['rejection_reason'] : null,
         );
     }
 

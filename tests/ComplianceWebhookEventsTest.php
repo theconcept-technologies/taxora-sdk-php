@@ -43,6 +43,77 @@ final class ComplianceWebhookEventsTest extends TestCase
         self::assertSame('NO-2026-0001', $changed->invoiceNumber);
     }
 
+    public function testTransactionStateChangedCarriesTheFullPayload(): void
+    {
+        $changed = ComplianceTransactionStateChangedEvent::fromEvent([
+            'id' => 'evt-refused',
+            'event' => 'compliance.transaction.state_changed',
+            'timestamp' => self::NOW,
+            'data' => ['object' => [
+                'id' => 88,
+                'invoice_number' => 'NO-2026-0001',
+                'internal_reference' => 'ERP-4711',
+                'country' => 'no',
+                'state' => 'submitted',
+                'previous_state' => 'submitted',
+                'provider_state' => 'refused',
+                'previous_provider_state' => 'accepted',
+                'buyer_rejected' => true,
+                'rejection_reason' => 'Wrong order number',
+                'submission_error' => null,
+                'delivery_check' => null,
+            ]],
+        ]);
+
+        self::assertSame('ERP-4711', $changed->internalReference);
+        self::assertSame(ComplianceTransactionState::SUBMITTED, $changed->previousState);
+        self::assertSame('refused', $changed->providerState);
+        self::assertSame('accepted', $changed->previousProviderState);
+        self::assertTrue($changed->buyerRejected);
+        self::assertTrue($changed->isBuyerRejected());
+        self::assertFalse($changed->isNotRequired());
+        self::assertSame('Wrong order number', $changed->rejectionReason);
+        self::assertNull($changed->submissionError);
+        self::assertNull($changed->deliveryCheck);
+    }
+
+    public function testTransactionStateChangedNotRequiredAndErrorFields(): void
+    {
+        $notRequired = ComplianceTransactionStateChangedEvent::fromEvent([
+            'id' => 'evt-nr', 'event' => 'compliance.transaction.state_changed', 'timestamp' => self::NOW,
+            'data' => ['object' => [
+                'id' => 89, 'state' => 'not_required', 'previous_state' => 'pending', 'delivery_check' => 'not_reachable',
+            ]],
+        ]);
+        self::assertTrue($notRequired->isNotRequired());
+        self::assertSame(ComplianceTransactionState::PENDING, $notRequired->previousState);
+        self::assertSame('not_reachable', $notRequired->deliveryCheck);
+
+        $error = ComplianceTransactionStateChangedEvent::fromEvent([
+            'id' => 'evt-err', 'event' => 'compliance.transaction.state_changed', 'timestamp' => self::NOW,
+            'data' => ['object' => ['id' => 90, 'state' => 'error', 'submission_error' => 'Provider rejected the document']],
+        ]);
+        self::assertSame(ComplianceTransactionState::ERROR, $error->state);
+        self::assertSame('Provider rejected the document', $error->submissionError);
+    }
+
+    public function testTransactionStateChangedToleratesOlderDeliveries(): void
+    {
+        $changed = ComplianceTransactionStateChangedEvent::fromEvent([
+            'id' => 'evt-old', 'event' => 'compliance.transaction.state_changed', 'timestamp' => self::NOW,
+            'data' => ['object' => ['id' => 88, 'state' => 'submitted', 'provider_state' => 'sent', 'country' => 'no', 'invoice_number' => 'NO-1']],
+        ]);
+
+        self::assertNull($changed->internalReference);
+        self::assertNull($changed->previousState);
+        self::assertNull($changed->previousProviderState);
+        self::assertFalse($changed->buyerRejected);
+        self::assertFalse($changed->isBuyerRejected());
+        self::assertNull($changed->rejectionReason);
+        self::assertNull($changed->submissionError);
+        self::assertNull($changed->deliveryCheck);
+    }
+
     public function testLedgerStateChanged(): void
     {
         $ledger = ComplianceLedgerStateChangedEvent::fromEvent([

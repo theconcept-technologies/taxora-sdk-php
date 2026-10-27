@@ -808,8 +808,17 @@ use Taxora\Sdk\Webhooks\WebhookEventType;
 switch (WebhookEventType::tryFrom($event['event'])) {
     case WebhookEventType::COMPLIANCE_TRANSACTION_STATE_CHANGED:
         $tx = ComplianceTransactionStateChangedEvent::fromEvent($event);
-        // $tx->transactionId, $tx->state (ComplianceTransactionState), $tx->providerState (sent, error, accepted, …),
-        // $tx->country, $tx->invoiceNumber — fetch the full transaction with getTransaction($tx->transactionId)
+        // $tx->transactionId, $tx->invoiceNumber, $tx->internalReference, $tx->country,
+        // $tx->state / $tx->previousState (ComplianceTransactionState),
+        // $tx->providerState / $tx->previousProviderState (sent, accepted, refused, paid, …),
+        // $tx->submissionError, $tx->deliveryCheck — full transaction: getTransaction($tx->transactionId)
+        if ($tx->isNotRequired()) {
+            // The buyer cannot receive e-invoices ($tx->deliveryCheck e.g. "not_reachable"):
+            // nothing was sent or billed — send your PDF to the buyer by e-mail yourself.
+        }
+        if ($tx->isBuyerRejected()) {
+            // The buyer refused the e-invoice ($tx->rejectionReason) — issue a credit note.
+        }
         break;
     case WebhookEventType::COMPLIANCE_LEDGER_STATE_CHANGED:
         $ledger = ComplianceLedgerStateChangedEvent::fromEvent($event);
@@ -819,6 +828,15 @@ switch (WebhookEventType::tryFrom($event['event'])) {
         // other / future events: ignore or handle the raw array
 }
 ```
+
+`compliance.transaction.state_changed` fires for **every real change** of a transaction: Taxora's
+own state (`submitted`, `error`, `not_required`) and the provider's delivery state (`accepted`,
+`refused`, `paid`, …). It is never sent twice for the same state and never for the transient
+`sending`. Fields added later (`internalReference`, the previous states, `buyerRejected`,
+`rejectionReason`, `submissionError`, `deliveryCheck`) are null / false on older deliveries.
+
+Transactions carry the same signal: `$tx->buyerRejected` / `$tx->rejectionReason`. To find
+rejected invoices: `listTransactions(providerState: 'refused')`.
 
 ---
 
