@@ -1811,6 +1811,149 @@ final class EReportingEndpointTest extends TestCase
         $endpoint->listTransactions(country: 'NOR');
     }
 
+    public function testCreateTransactionSendsAndParsesInternalReference(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::transactionPayload(['internal_reference' => 'ERP-4711']),
+            ])),
+        ]);
+
+        $tx = $this->createEndpoint($http)->createTransaction(
+            enrollmentId: 21,
+            transactionType: 'b2c_outbound',
+            invoiceNumber: 'TKT-2026-00001',
+            invoiceDate: '2026-06-15',
+            subtotal: '100.00',
+            total: '120.00',
+            invoiceLines: [self::sampleLine()],
+            internalReference: 'ERP-4711',
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame('ERP-4711', $payload['internal_reference']);
+        self::assertSame('ERP-4711', $tx->internalReference);
+    }
+
+    public function testCreateTransactionOmitsUnsetInternalReference(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::transactionPayload(),
+            ])),
+        ]);
+
+        $tx = $this->createEndpoint($http)->createTransaction(
+            enrollmentId: 21,
+            transactionType: 'b2c_outbound',
+            invoiceNumber: 'TKT-2026-00001',
+            invoiceDate: '2026-06-15',
+            subtotal: '100.00',
+            total: '120.00',
+            invoiceLines: [self::sampleLine()],
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertArrayNotHasKey('internal_reference', $payload);
+        self::assertNull($tx->internalReference);
+    }
+
+    public function testCreateTransactionRejectsOverlongInternalReference(): void
+    {
+        $http = new SequenceHttpClient([]);
+
+        try {
+            $this->createEndpoint($http)->createTransaction(
+                enrollmentId: 21,
+                transactionType: 'b2c_outbound',
+                invoiceNumber: 'TKT-2026-00001',
+                invoiceDate: '2026-06-15',
+                subtotal: '100.00',
+                total: '120.00',
+                invoiceLines: [self::sampleLine()],
+                internalReference: str_repeat('x', 101),
+            );
+            self::fail('Expected InvalidArgumentException was not thrown.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertSame('internalReference must not exceed 100 characters.', $exception->getMessage());
+        }
+
+        self::assertCount(0, $http->requests);
+    }
+
+    public function testUpdateTransactionSendsInternalReferenceAndEmptyStringClearsIt(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::transactionPayload(['internal_reference' => 'ERP-1']),
+            ])),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::transactionPayload(['internal_reference' => null]),
+            ])),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        $tx = $endpoint->updateTransaction(id: 88, internalReference: 'ERP-1');
+        self::assertSame('ERP-1', $tx->internalReference);
+        $cleared = $endpoint->updateTransaction(id: 88, internalReference: '');
+        self::assertNull($cleared->internalReference);
+
+        self::assertSame(['internal_reference' => 'ERP-1'], json_decode((string) $http->requests[0]->getBody(), true));
+        self::assertSame(['internal_reference' => ''], json_decode((string) $http->requests[1]->getBody(), true));
+    }
+
+    public function testUpdateTransactionRejectsOverlongInternalReference(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('internalReference must not exceed 100 characters.');
+
+        $endpoint->updateTransaction(id: 88, internalReference: str_repeat('x', 101));
+    }
+
+    public function testListTransactionsFiltersBySearchAndInternalReference(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [
+                    'data' => [self::transactionPayload(['internal_reference' => 'ERP-4711'])],
+                    'meta' => ['current_page' => 1, 'per_page' => 25, 'total' => 1, 'last_page' => 1],
+                ],
+            ])),
+        ]);
+
+        $page = $this->createEndpoint($http)->listTransactions(search: 'ACME 2026', internalReference: 'ERP-4711');
+
+        self::assertSame('ERP-4711', $page->rows[0]->internalReference);
+        self::assertSame(
+            'search=ACME%202026&internal_reference=ERP-4711&page=1&per_page=25',
+            $http->requests[0]->getUri()->getQuery(),
+        );
+    }
+
+    public function testListTransactionsRejectsOverlongSearchAndInternalReference(): void
+    {
+        $http = new SequenceHttpClient([]);
+        $endpoint = $this->createEndpoint($http);
+
+        foreach (['search', 'internalReference'] as $param) {
+            try {
+                $endpoint->listTransactions(...[$param => str_repeat('x', 101)]);
+                self::fail('Expected InvalidArgumentException was not thrown.');
+            } catch (InvalidArgumentException $exception) {
+                self::assertSame($param . ' must not exceed 100 characters.', $exception->getMessage());
+            }
+        }
+
+        self::assertCount(0, $http->requests);
+    }
+
     public function testRequestEReportingAccessSendsServiceAndCountries(): void
     {
         $http = new SequenceHttpClient([

@@ -437,6 +437,8 @@ final class EReportingEndpoint
      *                                {@see ComplianceTransaction::$invoicePdf}.
      * @param string|null $invoicePdfFilename file name shown to the buyer (max 120 characters); defaults to the
      *                                        file's basename when $invoicePdf is a path, else server-side to the invoice number
+     * @param string|null $internalReference your own reference (order number, ERP id; max 100 characters), stored for
+     *                                       your search only — never sent to the buyer or the tax authority
      */
     public function createTransaction(
         int $enrollmentId,
@@ -470,6 +472,7 @@ final class EReportingEndpoint
         ?string $extraInfo = null,
         ?string $invoicePdf = null,
         ?string $invoicePdfFilename = null,
+        ?string $internalReference = null,
     ): ComplianceTransaction {
         $this->assertPositiveId($enrollmentId, 'enrollmentId');
         $type = $this->enumValue($transactionType, self::TRANSACTION_TYPES, 'transactionType');
@@ -484,6 +487,9 @@ final class EReportingEndpoint
         }
         if ($counterpartyCountry !== null && strlen($counterpartyCountry) !== 2) {
             throw new InvalidArgumentException('counterpartyCountry must be an ISO 3166-1 alpha-2 code (exactly 2 characters).');
+        }
+        if ($internalReference !== null) {
+            $this->assertMaxLength($internalReference, 100, 'internalReference');
         }
 
         $invoiceFields = $this->invoiceFields(
@@ -519,6 +525,7 @@ final class EReportingEndpoint
             'payment_method_text' => $paymentMethodText,
             'payment_terms' => $paymentTerms,
             'submit_now' => $submitNow,
+            'internal_reference' => $internalReference,
         ], static fn ($v) => $v !== null) + $invoiceFields + $this->invoicePdfFields($invoicePdf, $invoicePdfFilename);
 
         $payload = $this->jsonPost($this->uri('/compliance/transactions'), $body);
@@ -529,7 +536,9 @@ final class EReportingEndpoint
     /**
      * Paginated list of the company's transactions (newest invoice date first),
      * optionally filtered by invoice-date range, state, type, enrollment and
-     * country (e.g. "NO" to see only Norwegian e-invoices). Unlike the other
+     * country (e.g. "NO" to see only Norwegian e-invoices). $search is a
+     * contains-match over invoice number, internal reference and buyer name;
+     * $internalReference matches exactly (both max 100 characters). Unlike the other
      * list endpoints the server VALIDATES $perPage (1-100) instead of clamping
      * it — out-of-range values yield a {@see ValidationException}.
      */
@@ -542,12 +551,20 @@ final class EReportingEndpoint
         int $perPage = 25,
         ?int $complianceEnrollmentId = null,
         ?string $country = null,
+        ?string $search = null,
+        ?string $internalReference = null,
     ): ComplianceTransactionPage {
         if ($complianceEnrollmentId !== null) {
             $this->assertPositiveId($complianceEnrollmentId, 'complianceEnrollmentId');
         }
         if ($country !== null) {
             $this->assertCountryCode($country, 'country');
+        }
+        if ($search !== null) {
+            $this->assertMaxLength($search, 100, 'search');
+        }
+        if ($internalReference !== null) {
+            $this->assertMaxLength($internalReference, 100, 'internalReference');
         }
 
         $uri = $this->uri('/compliance/transactions' . $this->buildQuery([
@@ -559,6 +576,8 @@ final class EReportingEndpoint
                 : null,
             'compliance_enrollment_id' => $complianceEnrollmentId !== null ? (string) $complianceEnrollmentId : null,
             'country' => $country !== null ? strtoupper($country) : null,
+            'search' => $search,
+            'internal_reference' => $internalReference,
             'page' => (string) $page,
             'per_page' => (string) $perPage,
         ]));
@@ -589,6 +608,9 @@ final class EReportingEndpoint
      * The e-invoicing fields ($counterpartyRegisterId … $extraInfo) behave as in
      * {@see createTransaction()}; they are merged into the stored ones. $invoicePdf
      * (path, raw bytes or base64) replaces a PDF that is still waiting to be sent.
+     *
+     * $internalReference (max 100 characters) is the exception to the limitation
+     * above: an empty string clears it.
      *
      * @param list<ComplianceInvoiceLine>|null $invoiceLines when provided, replaces all invoice lines
      */
@@ -623,6 +645,7 @@ final class EReportingEndpoint
         ?string $extraInfo = null,
         ?string $invoicePdf = null,
         ?string $invoicePdfFilename = null,
+        ?string $internalReference = null,
     ): ComplianceTransaction {
         $this->assertPositiveId($id, 'id');
         if ($invoiceNumber !== null) {
@@ -638,6 +661,9 @@ final class EReportingEndpoint
         }
         if ($counterpartyCountry !== null && strlen($counterpartyCountry) !== 2) {
             throw new InvalidArgumentException('counterpartyCountry must be an ISO 3166-1 alpha-2 code (exactly 2 characters).');
+        }
+        if ($internalReference !== null) {
+            $this->assertMaxLength($internalReference, 100, 'internalReference');
         }
 
         $body = array_filter([
@@ -660,6 +686,7 @@ final class EReportingEndpoint
             'remittance_information' => $remittanceInformation,
             'payment_method_text' => $paymentMethodText,
             'payment_terms' => $paymentTerms,
+            'internal_reference' => $internalReference,
         ], static fn ($v) => $v !== null) + $this->invoiceFields(
             $counterpartyRegisterId,
             $counterpartyAddress,

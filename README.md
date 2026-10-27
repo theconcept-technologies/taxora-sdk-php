@@ -351,6 +351,8 @@ $tx = $client->eReporting()->createTransaction(
     currency: 'EUR',                        // optional, defaults to EUR
     taxAmount: '20.00',
     submitNow: false,                       // defer provider submission
+    internalReference: 'ORDER-4711',        // optional, max 100: your own reference (order no., ERP id),
+                                            // never sent to the buyer or the tax authority
 );
 
 // Creation is idempotent: retrying the same invoice (enrollment + type + number +
@@ -363,6 +365,7 @@ $tx = $client->eReporting()->createTransaction(
 // transactions are reported automatically via the aggregated daily ledgers
 // and submitTransaction() returns a 422 ValidationException.
 $tx = $client->eReporting()->updateTransaction($tx->id, total: '130.00');
+$tx = $client->eReporting()->updateTransaction($tx->id, internalReference: ''); // empty string clears it
 $tx = $client->eReporting()->submitTransaction($tx->id);
 $client->eReporting()->deleteTransaction($obsoleteId);   // 204, only while pending
 
@@ -372,6 +375,8 @@ $page = $client->eReporting()->listTransactions(
     dateTo: '2026-06-30',
     state: 'pending',                       // pending | sending | submitted | error
     transactionType: 'b2c_outbound',
+    search: 'ACME',                         // contains-match: invoice number, internal reference, buyer name
+    internalReference: 'ORDER-4711',        // exact match on your internal reference
 );
 foreach ($page as $row) {
     echo $row->invoiceNumber . ': ' . $row->state->value . PHP_EOL;
@@ -384,7 +389,8 @@ foreach ($page as $row) {
 // Semicolon-separated CSV, max 2 MB; rows are grouped into invoices by
 // invoice_number, re-uploads are idempotent. Required columns: invoice_number,
 // invoice_date, transaction_type, subtotal, total, line_description,
-// line_quantity, line_price, tax_name, tax_percent, tax_category.
+// line_quantity, line_price, tax_name, tax_percent, tax_category. Optional:
+// internal_reference (your own reference per invoice, max 100 chars).
 $result = $client->eReporting()->importTransactions(
     $enrollment->id,
     file_get_contents('transactions.csv'),  // raw CSV content
