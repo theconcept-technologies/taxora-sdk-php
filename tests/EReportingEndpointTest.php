@@ -22,6 +22,7 @@ use Taxora\Sdk\Http\AuthMiddleware;
 use Taxora\Sdk\Http\InMemoryTokenStorage;
 use Taxora\Sdk\Http\Token;
 use Taxora\Sdk\Tests\Fixtures\SequenceHttpClient;
+use Taxora\Sdk\ValueObjects\ComplianceEurEquivalent;
 use Taxora\Sdk\ValueObjects\ComplianceInvoiceLine;
 use Taxora\Sdk\ValueObjects\ComplianceLineTax;
 use Taxora\Sdk\ValueObjects\ComplianceTransaction;
@@ -2635,6 +2636,126 @@ final class EReportingEndpointTest extends TestCase
 
         $this->expectException(ValidationException::class);
         $this->createEndpoint($http)->exportRevenueTaxRatesCsv();
+    }
+
+    /* ---------- transactions CSV export + EUR equivalent ---------- */
+
+    public function testExportTransactionsCsvReturnsRawBytesWithListFilters(): void
+    {
+        $csv = "invoice_number;internal_reference;invoice_date;currency;total;eur_rate;eur_total\nINV-1;ERP-1;2026-09-15;NOK;1150.00;11.6250;98.92\n";
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'text/csv; charset=UTF-8'], $csv),
+        ]);
+
+        $result = $this->createEndpoint($http)->exportTransactionsCsv(
+            dateFrom: '2026-01-01',
+            dateTo: new DateTimeImmutable('2026-09-30'),
+            state: ComplianceTransactionState::SUBMITTED,
+            transactionType: 'crossborder_outbound',
+            complianceEnrollmentId: 12,
+            country: 'no',
+            search: 'ACME',
+            internalReference: 'ERP-1',
+            providerState: 'refused',
+        );
+
+        self::assertSame($csv, $result);
+        $request = $http->requests[0];
+        self::assertSame('GET', $request->getMethod());
+        self::assertSame('/v1/compliance/transactions/export.csv', $request->getUri()->getPath());
+        self::assertStringContainsString('text/csv', $request->getHeaderLine('Accept'));
+        parse_str($request->getUri()->getQuery(), $query);
+        self::assertSame([
+            'date_from' => '2026-01-01',
+            'date_to' => '2026-09-30',
+            'state' => 'submitted',
+            'transaction_type' => 'crossborder_outbound',
+            'compliance_enrollment_id' => '12',
+            'country' => 'NO',
+            'search' => 'ACME',
+            'internal_reference' => 'ERP-1',
+            'provider_state' => 'refused',
+        ], $query);
+    }
+
+    public function testExportTransactionsCsvWithoutFiltersSendsNoQueryOrPagination(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'text/csv; charset=UTF-8'], "invoice_number\n"),
+        ]);
+
+        $this->createEndpoint($http)->exportTransactionsCsv();
+
+        self::assertSame('', $http->requests[0]->getUri()->getQuery());
+    }
+
+    public function testExportTransactionsCsvValidatesFiltersBeforeHttp(): void
+    {
+        $http = new SequenceHttpClient([]);
+        $endpoint = $this->createEndpoint($http);
+
+        foreach ([
+            ['providerState' => 'Refused'],
+            ['country' => 'NOR'],
+            ['search' => str_repeat('x', 101)],
+            ['complianceEnrollmentId' => 0],
+        ] as $args) {
+            try {
+                $endpoint->exportTransactionsCsv(...$args);
+                self::fail('Expected InvalidArgumentException was not thrown.');
+            } catch (InvalidArgumentException) {
+                // expected
+            }
+        }
+
+        self::assertCount(0, $http->requests);
+    }
+
+    public function testExportTransactionsCsvThrowsValidationExceptionOn422(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(422, ['Content-Type' => 'application/json'], '{"message":"The given data was invalid.","errors":{"date_to":["invalid"]}}'),
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $this->createEndpoint($http)->exportTransactionsCsv();
+    }
+
+    public function testTransactionParsesEurEquivalent(): void
+    {
+        $tx = ComplianceTransaction::fromArray(self::transactionPayload([
+            'currency' => 'NOK',
+            'eur_equivalent' => [
+                'subtotal' => '79.14',
+                'tax_amount' => '19.78',
+                'total' => '98.92',
+                'rate' => '11.6250',
+                'rate_date' => '2026-09-15',
+                'source' => 'ECB',
+            ],
+        ]));
+
+        self::assertInstanceOf(ComplianceEurEquivalent::class, $tx->eurEquivalent);
+        self::assertSame('79.14', $tx->eurEquivalent->subtotal);
+        self::assertSame('19.78', $tx->eurEquivalent->taxAmount);
+        self::assertSame('98.92', $tx->eurEquivalent->total);
+        self::assertSame('11.6250', $tx->eurEquivalent->rate);
+        self::assertSame('2026-09-15', $tx->eurEquivalent->rateDate);
+        self::assertSame('ECB', $tx->eurEquivalent->source);
+        self::assertSame([
+            'subtotal' => '79.14',
+            'tax_amount' => '19.78',
+            'total' => '98.92',
+            'rate' => '11.6250',
+            'rate_date' => '2026-09-15',
+            'source' => 'ECB',
+        ], $tx->eurEquivalent->toArray());
+    }
+
+    public function testTransactionEurEquivalentIsNullForEurOrWhenAbsent(): void
+    {
+        self::assertNull(ComplianceTransaction::fromArray(self::transactionPayload())->eurEquivalent);
+        self::assertNull(ComplianceTransaction::fromArray(self::transactionPayload(['eur_equivalent' => null]))->eurEquivalent);
     }
 
     public function testGetRevenueStatisticsFiltersByEnrollment(): void

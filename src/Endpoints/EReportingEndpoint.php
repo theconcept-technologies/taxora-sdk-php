@@ -557,39 +557,65 @@ final class EReportingEndpoint
         ?string $internalReference = null,
         ?string $providerState = null,
     ): ComplianceTransactionPage {
-        if ($complianceEnrollmentId !== null) {
-            $this->assertPositiveId($complianceEnrollmentId, 'complianceEnrollmentId');
-        }
-        if ($country !== null) {
-            $this->assertCountryCode($country, 'country');
-        }
-        if ($search !== null) {
-            $this->assertMaxLength($search, 100, 'search');
-        }
-        if ($internalReference !== null) {
-            $this->assertMaxLength($internalReference, 100, 'internalReference');
-        }
-        if ($providerState !== null && preg_match('/^[a-z_]{1,30}$/', $providerState) !== 1) {
-            throw new InvalidArgumentException('providerState must be 1-30 lowercase letters or underscores (e.g. "refused").');
-        }
+        $filters = $this->transactionFilters(
+            $dateFrom,
+            $dateTo,
+            $state,
+            $transactionType,
+            $complianceEnrollmentId,
+            $country,
+            $search,
+            $internalReference,
+            $providerState,
+        );
 
-        $uri = $this->uri('/compliance/transactions' . $this->buildQuery([
-            'date_from' => $dateFrom !== null ? $this->formatDate($dateFrom) : null,
-            'date_to' => $dateTo !== null ? $this->formatDate($dateTo) : null,
-            'state' => $state !== null ? $this->enumValue($state, self::TRANSACTION_STATES, 'state') : null,
-            'transaction_type' => $transactionType !== null
-                ? $this->enumValue($transactionType, self::TRANSACTION_TYPES, 'transactionType')
-                : null,
-            'compliance_enrollment_id' => $complianceEnrollmentId !== null ? (string) $complianceEnrollmentId : null,
-            'country' => $country !== null ? strtoupper($country) : null,
-            'search' => $search,
-            'internal_reference' => $internalReference,
-            'provider_state' => $providerState,
+        $uri = $this->uri('/compliance/transactions' . $this->buildQuery($filters + [
             'page' => (string) $page,
             'per_page' => (string) $perPage,
         ]));
 
         return ComplianceTransactionPage::fromArray($this->extractData($this->jsonGet($uri)));
+    }
+
+    /**
+     * All transactions matching the filters as a semicolon-separated CSV for
+     * bookkeeping — the same filters as {@see listTransactions()} (without
+     * pagination). Columns: invoice_number; internal_reference; invoice_date;
+     * due_date; country; transaction_type; document_type; state; delivery_state;
+     * buyer_rejected; rejection_reason; counterparty_name; counterparty_country;
+     * counterparty_vat_number; currency; subtotal; tax_amount; total; eur_rate;
+     * eur_rate_date; eur_subtotal; eur_tax_amount; eur_total; provider_invoice_id;
+     * created_at. The eur_* columns hold the ECB reference conversion for non-EUR
+     * invoices (empty for EUR). The server caps the export at 50,000 rows.
+     *
+     * @return string the raw CSV bytes, returned exactly as sent
+     */
+    public function exportTransactionsCsv(
+        DateTimeInterface|string|null $dateFrom = null,
+        DateTimeInterface|string|null $dateTo = null,
+        ComplianceTransactionState|string|null $state = null,
+        ComplianceTransactionType|string|null $transactionType = null,
+        ?int $complianceEnrollmentId = null,
+        ?string $country = null,
+        ?string $search = null,
+        ?string $internalReference = null,
+        ?string $providerState = null,
+    ): string {
+        $filters = $this->transactionFilters(
+            $dateFrom,
+            $dateTo,
+            $state,
+            $transactionType,
+            $complianceEnrollmentId,
+            $country,
+            $search,
+            $internalReference,
+            $providerState,
+        );
+
+        $uri = $this->uri('/compliance/transactions/export.csv' . $this->buildQuery($filters));
+
+        return (string) $this->rawGet($uri, 'text/csv, application/json', 'transactions CSV export')->getBody();
     }
 
     /** Fetch a single transaction by its id. */
@@ -1140,6 +1166,54 @@ final class EReportingEndpoint
     // ---------------------------------------------------------------------
     // Input validation
     // ---------------------------------------------------------------------
+
+    /**
+     * Validated transaction-list filters as query parameters (null = not sent),
+     * shared by listTransactions() and exportTransactionsCsv().
+     *
+     * @return array<string,string|null>
+     */
+    private function transactionFilters(
+        DateTimeInterface|string|null $dateFrom,
+        DateTimeInterface|string|null $dateTo,
+        ComplianceTransactionState|string|null $state,
+        ComplianceTransactionType|string|null $transactionType,
+        ?int $complianceEnrollmentId,
+        ?string $country,
+        ?string $search,
+        ?string $internalReference,
+        ?string $providerState,
+    ): array {
+        if ($complianceEnrollmentId !== null) {
+            $this->assertPositiveId($complianceEnrollmentId, 'complianceEnrollmentId');
+        }
+        if ($country !== null) {
+            $this->assertCountryCode($country, 'country');
+        }
+        if ($search !== null) {
+            $this->assertMaxLength($search, 100, 'search');
+        }
+        if ($internalReference !== null) {
+            $this->assertMaxLength($internalReference, 100, 'internalReference');
+        }
+        if ($providerState !== null && preg_match('/^[a-z_]{1,30}$/', $providerState) !== 1) {
+            throw new InvalidArgumentException('providerState must be 1-30 lowercase letters or underscores (e.g. "refused").');
+        }
+
+        return [
+            'date_from' => $dateFrom !== null ? $this->formatDate($dateFrom) : null,
+            'date_to' => $dateTo !== null ? $this->formatDate($dateTo) : null,
+            'state' => $state !== null ? $this->enumValue($state, self::TRANSACTION_STATES, 'state') : null,
+            'transaction_type' => $transactionType !== null
+                ? $this->enumValue($transactionType, self::TRANSACTION_TYPES, 'transactionType')
+                : null,
+            'compliance_enrollment_id' => $complianceEnrollmentId !== null ? (string) $complianceEnrollmentId : null,
+            'country' => $country !== null ? strtoupper($country) : null,
+            'search' => $search,
+            'internal_reference' => $internalReference,
+            'provider_state' => $providerState,
+        ];
+    }
 
     /**
      * Resolve an enum instance (or raw string) against the allowed wire values,

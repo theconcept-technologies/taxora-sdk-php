@@ -380,7 +380,26 @@ $page = $client->eReporting()->listTransactions(
 );
 foreach ($page as $row) {
     echo $row->invoiceNumber . ': ' . $row->state->value . PHP_EOL;
+
+    // Non-EUR invoices carry the EUR amounts at the ECB reference rate of the
+    // invoice date (null for EUR invoices or when no rate is known):
+    if ($row->eurEquivalent !== null) {
+        echo $row->eurEquivalent->total . ' EUR @ ' . $row->eurEquivalent->rate
+            . ' (' . $row->eurEquivalent->source . ', ' . $row->eurEquivalent->rateDate . ')' . PHP_EOL;
+    }
 }
+
+// The same filters (without pagination) as a semicolon-separated CSV for your
+// bookkeeping — incl. internal reference, delivery state, buyer rejection and the
+// eur_rate / eur_rate_date / eur_subtotal / eur_tax_amount / eur_total columns.
+// Max 50,000 rows; the bytes are returned exactly as sent.
+$csv = $client->eReporting()->exportTransactionsCsv(
+    dateFrom: '2026-01-01',
+    dateTo: '2026-09-30',
+    country: 'NO',
+    providerState: null,                    // e.g. 'refused' for rejected invoices only
+);
+file_put_contents('transactions.csv', $csv);
 ```
 
 #### 3. CSV bulk import

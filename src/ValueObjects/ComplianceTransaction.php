@@ -16,7 +16,7 @@ use Taxora\Sdk\Enums\ComplianceTransactionType;
  * reference, provider state, invoice lines) were added with e-invoicing
  * (Norway / Peppol) and default to null / [] when an older server omits them.
  * So do $documentUrl, $deliveryCheck and $invoicePdf (e-invoicing delivery),
- * and $internalReference / $pdfUrl / $buyerRejected / $rejectionReason.
+ * and $internalReference / $pdfUrl / $buyerRejected / $rejectionReason / $eurEquivalent.
  */
 final readonly class ComplianceTransaction
 {
@@ -30,6 +30,7 @@ final readonly class ComplianceTransaction
      * @param string|null $pdfUrl where to download the invoice as a readable PDF (the attached seller PDF or the provider's rendering of the e-invoice; API-key auth) — see EReportingEndpoint::getTransactionPdf(); null while none is available
      * @param bool $buyerRejected e-invoicing: the buyer refused the invoice (provider state refused) — correct it with a credit note
      * @param string|null $rejectionReason e-invoicing: the buyer's reason for the rejection, when given
+     * @param ComplianceEurEquivalent|null $eurEquivalent non-EUR invoices: the amounts in EUR at the ECB reference rate of the invoice date; null for EUR invoices or when no rate is known
      */
     public function __construct(
         public int $id,
@@ -77,6 +78,7 @@ final readonly class ComplianceTransaction
         public ?string $pdfUrl = null,
         public bool $buyerRejected = false,
         public ?string $rejectionReason = null,
+        public ?ComplianceEurEquivalent $eurEquivalent = null,
     ) {
     }
 
@@ -129,6 +131,7 @@ final readonly class ComplianceTransaction
             pdfUrl: isset($data['pdf_url']) && $data['pdf_url'] !== '' ? (string) $data['pdf_url'] : null,
             buyerRejected: (bool) ($data['buyer_rejected'] ?? false),
             rejectionReason: isset($data['rejection_reason']) ? (string) $data['rejection_reason'] : null,
+            eurEquivalent: is_array($data['eur_equivalent'] ?? null) ? ComplianceEurEquivalent::fromArray($data['eur_equivalent']) : null,
         );
     }
 
