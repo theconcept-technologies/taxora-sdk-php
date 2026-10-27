@@ -736,6 +736,35 @@ $url = $client->eReporting()->createBillingPortalSession();   // 404 HttpExcepti
 Unknown or contact-only plans, unmet prerequisites (e.g. Norway's plan requires
 France e-reporting) and an already active plan answer `422` (`ValidationException`).
 
+### 📬 Notification emails
+
+Opt-in emails about e-reporting / e-invoicing for your company — readable by every member,
+changeable by company **admins** only:
+
+```php
+use Taxora\Sdk\Enums\Language;
+
+$settings = $client->eReporting()->getNotificationSettings();   // ComplianceNotificationSettings
+$settings->recipients;      // ['accounting@example.com'] — up to 5
+$settings->language;        // "de" | "en"
+$settings->notOnPeppol;     // hourly email listing invoices held back because the buyer is not on Peppol
+$settings->digest;          // "off" | "daily" (08:00, the day before) | "weekly" (Mondays, the last 7 days)
+$settings->digestSentAt;    // ISO 8601 timestamp of the last digest, or null
+
+// Only the given fields change (at least one is required); recipients replaces the whole list:
+$settings = $client->eReporting()->updateNotificationSettings(
+    recipients: ['accounting@example.com', 'cfo@example.com'],
+    language: Language::ENGLISH,                  // or 'en'
+    notOnPeppol: true,
+    digest: 'weekly',
+);
+```
+
+The SDK checks the input before sending (max 5 valid addresses, `language` de/en, `digest` off/daily/weekly)
+and throws `InvalidArgumentException`. Switching an email on without any recipient answers `422`
+(`ValidationException`). `notOnPeppol` only reports invoices held back after it was switched on.
+A non-admin gets `403` with body code `admin_only` (or `read_only_role`) as `HttpException`.
+
 ### 💶 Usage summaries (billing)
 
 Read-only transparency over what is billed per feature and billing period
@@ -900,6 +929,7 @@ Each endpoint handles:
 | `ComplianceTransactionDocument` | Legal e-invoice or invoice-PDF download (`content`, `contentType`, `filename`, `saveTo()`) |
 | `ComplianceOfferings` | Self-service plans per country, coverage and access flags (`getOfferings()`)                         |
 | `ComplianceCheckoutSession` / `ComplianceSubscriptionState` | Checkout start (`id`, `url`) and confirmation (`active`, `plan`, …) |
+| `ComplianceNotificationSettings` | Opt-in compliance emails (`recipients`, `language`, `notOnPeppol`, `digest`, `digestSentAt`) |
 | `UsageSummary` / `UsageSummaryPage` | Billed usage per feature and period, with `UsageEvent`s for a single period            |
 | `SmartEnrichmentJob` | Smart Enrichment (reverse VAT lookup) job with its results                                            |
 | `LocalTaxNumberRow` | One company of the local tax numbers report (`taxNumber`, `taxNumberName`, `taxNumberSource`, `vatStatus`) |
@@ -1011,7 +1041,7 @@ by a user whose only role is **read-only** answer `403` with body code `read_onl
 (`HttpException`; read it from `getResponseBody()`) — ask an admin of the company to make the change.
 
 Adding countries or changing plans — creating an enrollment, `createCheckout()`, `confirmCheckout()` and
-`createBillingPortalSession()` — is reserved for company **admins**: a user with the developer role gets
+`createBillingPortalSession()` — and changing the notification emails (`updateNotificationSettings()`) is reserved for company **admins**: a user with the developer role gets
 `403` with body `{"message": "…", "code": "admin_only"}` (`HttpException`) — only admins can add countries
 or change plans.
 

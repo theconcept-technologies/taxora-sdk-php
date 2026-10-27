@@ -14,6 +14,7 @@ use Taxora\Sdk\Enums\ComplianceService;
 use Taxora\Sdk\Enums\ComplianceTaxReportState;
 use Taxora\Sdk\Enums\ComplianceTransactionState;
 use Taxora\Sdk\Enums\ComplianceTransactionType;
+use Taxora\Sdk\Enums\Language;
 use Taxora\Sdk\Enums\PeppolLookupStatus;
 use Taxora\Sdk\Exceptions\HttpException;
 use Taxora\Sdk\Exceptions\ValidationException;
@@ -25,6 +26,7 @@ use Taxora\Sdk\Tests\Fixtures\SequenceHttpClient;
 use Taxora\Sdk\ValueObjects\ComplianceEurEquivalent;
 use Taxora\Sdk\ValueObjects\ComplianceInvoiceLine;
 use Taxora\Sdk\ValueObjects\ComplianceLineTax;
+use Taxora\Sdk\ValueObjects\ComplianceNotificationSettings;
 use Taxora\Sdk\ValueObjects\ComplianceTransaction;
 use Taxora\Sdk\ValueObjects\PeppolLookupResult;
 use Taxora\Sdk\ValueObjects\RegistryCompany;
@@ -2958,6 +2960,150 @@ final class EReportingEndpointTest extends TestCase
             self::fail('Expected HttpException');
         } catch (HttpException $e) {
             self::assertSame(404, $e->getStatusCode());
+        }
+    }
+
+    /* ---------- notification emails ---------- */
+
+    public function testGetNotificationSettingsParsesResponse(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [
+                    'recipients' => ['accounting@example.com', 'cfo@example.com'],
+                    'language' => 'en',
+                    'not_on_peppol' => true,
+                    'digest' => 'weekly',
+                    'digest_sent_at' => '2026-10-26T08:00:00+00:00',
+                ],
+            ])),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['recipients' => [], 'language' => 'de', 'not_on_peppol' => false, 'digest' => 'off', 'digest_sent_at' => null],
+            ])),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        $settings = $endpoint->getNotificationSettings();
+        self::assertSame('GET', $http->requests[0]->getMethod());
+        self::assertSame('/v1/compliance/notification-settings', $http->requests[0]->getUri()->getPath());
+        self::assertInstanceOf(ComplianceNotificationSettings::class, $settings);
+        self::assertSame(['accounting@example.com', 'cfo@example.com'], $settings->recipients);
+        self::assertSame('en', $settings->language);
+        self::assertTrue($settings->notOnPeppol);
+        self::assertSame('weekly', $settings->digest);
+        self::assertSame('2026-10-26T08:00:00+00:00', $settings->digestSentAt);
+        self::assertSame([
+            'recipients' => ['accounting@example.com', 'cfo@example.com'],
+            'language' => 'en',
+            'not_on_peppol' => true,
+            'digest' => 'weekly',
+            'digest_sent_at' => '2026-10-26T08:00:00+00:00',
+        ], $settings->toArray());
+
+        $empty = $endpoint->getNotificationSettings();
+        self::assertSame([], $empty->recipients);
+        self::assertFalse($empty->notOnPeppol);
+        self::assertSame('off', $empty->digest);
+        self::assertNull($empty->digestSentAt);
+    }
+
+    public function testUpdateNotificationSettingsSendsOnlyGivenFields(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['recipients' => ['accounting@example.com'], 'language' => 'en', 'not_on_peppol' => true, 'digest' => 'daily', 'digest_sent_at' => null],
+            ])),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['recipients' => ['accounting@example.com'], 'language' => 'en', 'not_on_peppol' => false, 'digest' => 'daily', 'digest_sent_at' => null],
+            ])),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        $settings = $endpoint->updateNotificationSettings(
+            recipients: [' accounting@example.com '],
+            language: Language::ENGLISH,
+            notOnPeppol: true,
+            digest: 'daily',
+        );
+        self::assertSame('PUT', $http->requests[0]->getMethod());
+        self::assertSame('/v1/compliance/notification-settings', $http->requests[0]->getUri()->getPath());
+        self::assertSame(
+            ['recipients' => ['accounting@example.com'], 'language' => 'en', 'not_on_peppol' => true, 'digest' => 'daily'],
+            json_decode((string) $http->requests[0]->getBody(), true)
+        );
+        self::assertTrue($settings->notOnPeppol);
+        self::assertSame('daily', $settings->digest);
+
+        $endpoint->updateNotificationSettings(notOnPeppol: false);
+        self::assertSame(['not_on_peppol' => false], json_decode((string) $http->requests[1]->getBody(), true));
+    }
+
+    public function testUpdateNotificationSettingsCanClearRecipients(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => ['recipients' => [], 'language' => 'de', 'not_on_peppol' => false, 'digest' => 'off', 'digest_sent_at' => null],
+            ])),
+        ]);
+        $endpoint = $this->createEndpoint($http);
+
+        $endpoint->updateNotificationSettings(recipients: [], digest: 'off');
+        self::assertSame(['recipients' => [], 'digest' => 'off'], json_decode((string) $http->requests[0]->getBody(), true));
+    }
+
+    public function testUpdateNotificationSettingsValidatesBeforeRequest(): void
+    {
+        $http = new SequenceHttpClient([]);
+        $endpoint = $this->createEndpoint($http);
+
+        $cases = [
+            'no field' => static fn () => $endpoint->updateNotificationSettings(),
+            'too many recipients' => static fn () => $endpoint->updateNotificationSettings(
+                recipients: ['a@x.io', 'b@x.io', 'c@x.io', 'd@x.io', 'e@x.io', 'f@x.io'],
+            ),
+            'invalid email' => static fn () => $endpoint->updateNotificationSettings(recipients: ['not-an-email']),
+            'empty email' => static fn () => $endpoint->updateNotificationSettings(recipients: ['  ']),
+            'unknown language' => static fn () => $endpoint->updateNotificationSettings(language: 'fr'),
+            'unknown digest' => static fn () => $endpoint->updateNotificationSettings(digest: 'monthly'),
+        ];
+
+        foreach ($cases as $name => $call) {
+            try {
+                $call();
+                self::fail('Expected InvalidArgumentException for ' . $name);
+            } catch (InvalidArgumentException) {
+                // expected
+            }
+        }
+        self::assertSame([], $http->requests);
+    }
+
+    public function testUpdateNotificationSettingsWithoutRecipientIsValidationException(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(422, ['Content-Type' => 'application/json'], '{"success":false,"message":"Add at least one recipient to switch an email on."}'),
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $this->createEndpoint($http)->updateNotificationSettings(digest: 'weekly');
+    }
+
+    public function testUpdateNotificationSettingsByNonAdminSurfacesAs403HttpException(): void
+    {
+        $body = '{"message":"Only company admins can change this.","code":"admin_only"}';
+        $http = new SequenceHttpClient([new Response(403, ['Content-Type' => 'application/json'], $body)]);
+
+        try {
+            $this->createEndpoint($http)->updateNotificationSettings(digest: 'daily');
+            self::fail('Expected HttpException');
+        } catch (HttpException $e) {
+            self::assertSame(403, $e->getStatusCode());
+            self::assertSame('admin_only', json_decode((string) $e->getResponseBody(), true)['code']);
         }
     }
 

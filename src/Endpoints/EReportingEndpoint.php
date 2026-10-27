@@ -18,6 +18,7 @@ use Taxora\Sdk\Enums\ComplianceService;
 use Taxora\Sdk\Enums\ComplianceTaxReportState;
 use Taxora\Sdk\Enums\ComplianceTransactionState;
 use Taxora\Sdk\Enums\ComplianceTransactionType;
+use Taxora\Sdk\Enums\Language;
 use Taxora\Sdk\Exceptions\AuthenticationException;
 use Taxora\Sdk\Exceptions\HttpException;
 use Taxora\Sdk\Exceptions\ValidationException;
@@ -31,6 +32,7 @@ use Taxora\Sdk\ValueObjects\ComplianceEnrollment;
 use Taxora\Sdk\ValueObjects\ComplianceEnrollmentPage;
 use Taxora\Sdk\ValueObjects\ComplianceImportResult;
 use Taxora\Sdk\ValueObjects\ComplianceInvoiceLine;
+use Taxora\Sdk\ValueObjects\ComplianceNotificationSettings;
 use Taxora\Sdk\ValueObjects\ComplianceOfferings;
 use Taxora\Sdk\ValueObjects\ComplianceSubscriptionState;
 use Taxora\Sdk\ValueObjects\ComplianceTaxReport;
@@ -87,6 +89,10 @@ final class EReportingEndpoint
     ];
     private const TRANSACTION_STATES = ['pending', 'sending', 'submitted', 'error', 'not_required'];
     private const SERVICES = ['e_reporting', 'e_invoicing'];
+    private const NOTIFICATION_LANGUAGES = ['de', 'en'];
+    private const NOTIFICATION_DIGESTS = ['off', 'daily', 'weekly'];
+    /** Server limit for notification-settings recipients. */
+    private const NOTIFICATION_MAX_RECIPIENTS = 5;
     /** Countries served by registryLookup() / peppolLookup(). */
     private const LOOKUP_COUNTRIES = ['NO'];
     /** Server limit for invoice_pdf (some e-invoicing networks cap attachments at 10 MB). */
@@ -1108,6 +1114,85 @@ final class EReportingEndpoint
         }
 
         return $url;
+    }
+
+    // ---------------------------------------------------------------------
+    // Notification emails
+    // ---------------------------------------------------------------------
+
+    /**
+     * The company's opt-in e-reporting / e-invoicing emails: who gets them, in
+     * which language, the "buyer not on Peppol" email and the digest. Readable
+     * by every member of the company.
+     */
+    public function getNotificationSettings(): ComplianceNotificationSettings
+    {
+        return ComplianceNotificationSettings::fromArray(
+            $this->extractData($this->jsonGet($this->uri('/compliance/notification-settings')))
+        );
+    }
+
+    /**
+     * Change the company's e-reporting / e-invoicing emails — only the given
+     * fields change (at least one is required).
+     *
+     * - $recipients: up to 5 email addresses; replaces the whole list ([] clears it)
+     * - $language: "de" or "en"
+     * - $notOnPeppol: email (at most hourly) listing new invoices that were not sent
+     *   because the buyer is not on Peppol — only invoices held back after switching it on
+     * - $digest: "off", "daily" (08:00, for the day before) or "weekly" (Mondays, for the last 7 days)
+     *
+     * Switching an email on without any recipient yields a {@see ValidationException}
+     * (HTTP 422). Reserved for company admins: other users get a 403
+     * {@see HttpException} with body code "admin_only" (or "read_only_role").
+     *
+     * @param list<string>|null $recipients
+     */
+    public function updateNotificationSettings(
+        ?array $recipients = null,
+        Language|string|null $language = null,
+        ?bool $notOnPeppol = null,
+        ?string $digest = null,
+    ): ComplianceNotificationSettings {
+        if ($recipients !== null) {
+            if (count($recipients) > self::NOTIFICATION_MAX_RECIPIENTS) {
+                throw new InvalidArgumentException(sprintf(
+                    'recipients must not contain more than %d entries.',
+                    self::NOTIFICATION_MAX_RECIPIENTS
+                ));
+            }
+            $normalized = [];
+            foreach ($recipients as $index => $recipient) {
+                $param = sprintf('recipients[%s]', (string) $index);
+                if (!is_string($recipient)) {
+                    throw new InvalidArgumentException(sprintf('%s must be a string.', $param));
+                }
+                $recipient = trim($recipient);
+                $this->assertEmail($recipient, $param);
+                $this->assertMaxLength($recipient, 191, $param);
+                $normalized[] = $recipient;
+            }
+            $recipients = $normalized;
+        }
+
+        $body = array_filter([
+            'recipients' => $recipients,
+            'language' => $language !== null
+                ? $this->enumValue($language, self::NOTIFICATION_LANGUAGES, 'language')
+                : null,
+            'not_on_peppol' => $notOnPeppol,
+            'digest' => $digest !== null
+                ? $this->enumValue($digest, self::NOTIFICATION_DIGESTS, 'digest')
+                : null,
+        ], static fn ($v) => $v !== null);
+
+        if ($body === []) {
+            throw new InvalidArgumentException('updateNotificationSettings requires at least one field to update.');
+        }
+
+        $payload = $this->jsonSend('PUT', $this->uri('/compliance/notification-settings'), $body, [200]);
+
+        return ComplianceNotificationSettings::fromArray($this->extractData($payload));
     }
 
     // ---------------------------------------------------------------------
