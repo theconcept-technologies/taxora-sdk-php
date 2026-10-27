@@ -9,5 +9,5 @@ namespace Taxora\Sdk;
  */
 final class Version
 {
-    public const SDK = '1.12.0';
+    public const SDK = '1.13.0';
 }
