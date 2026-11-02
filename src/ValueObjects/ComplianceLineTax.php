@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Taxora\Sdk\ValueObjects;
 
 use InvalidArgumentException;
+use Taxora\Sdk\Enums\ComplianceTaxCategory;
 
 /**
  * One tax applied to an invoice line of a compliance transaction (input).
@@ -16,20 +17,33 @@ use InvalidArgumentException;
  */
 final readonly class ComplianceLineTax
 {
+    public string $category;
+
     public function __construct(
         public string $name,
         public float|int|string $percent,
-        public string $category,
+        ComplianceTaxCategory|string $category,
         public ?string $comment = null,
     ) {
         if (trim($name) === '') {
             throw new InvalidArgumentException('Tax name must not be empty.');
         }
-        if (trim($category) === '') {
-            throw new InvalidArgumentException('Tax category must not be empty.');
-        }
         if (is_string($percent) && !is_numeric($percent)) {
             throw new InvalidArgumentException('Tax percent must be numeric.');
+        }
+        if ((float) $percent < 0 || (float) $percent > 100) {
+            throw new InvalidArgumentException('Tax percent must be between 0 and 100.');
+        }
+
+        $parsed = ComplianceTaxCategory::fromInput($category);
+        // Stored as the code (upper case), so a lower-case "s" or the enum both end up as "S".
+        $this->category = $parsed->value;
+
+        if ($comment !== null && strlen($comment) > 255) {
+            throw new InvalidArgumentException('Tax comment must not exceed 255 characters.');
+        }
+        if ($parsed->requiresExemptionCode() && ($comment === null || trim($comment) === '')) {
+            throw new InvalidArgumentException('An exempt (category E) tax needs the exemption code (VATEX) as comment.');
         }
     }
 

@@ -508,15 +508,15 @@ final class EReportingEndpoint
         if ($taxAmount !== null) {
             $this->assertAmount($taxAmount, 'taxAmount');
         }
-        if ($currency !== null && strlen($currency) !== 3) {
-            throw new InvalidArgumentException('currency must be an ISO 4217 code (exactly 3 characters).');
-        }
-        if ($counterpartyCountry !== null && strlen($counterpartyCountry) !== 2) {
-            throw new InvalidArgumentException('counterpartyCountry must be an ISO 3166-1 alpha-2 code (exactly 2 characters).');
-        }
+        $currency = $this->normalizeCurrency($currency);
+        $counterpartyCountry = $this->normalizeCountryCode($counterpartyCountry, 'counterpartyCountry');
         if ($internalReference !== null) {
             $this->assertMaxLength($internalReference, 100, 'internalReference');
         }
+        if ($counterpartyVatNumber !== null) {
+            $this->assertMaxLength($counterpartyVatNumber, 50, 'counterpartyVatNumber');
+        }
+        $this->assertDocumentDates($invoiceNumber, $invoiceDate, $dueDate, $isCreditNote, $amendedNumber, $amendedDate);
 
         $invoiceFields = $this->invoiceFields(
             $counterpartyRegisterId,
@@ -813,12 +813,8 @@ final class EReportingEndpoint
                 $this->assertAmount($amount, $name);
             }
         }
-        if ($currency !== null && strlen($currency) !== 3) {
-            throw new InvalidArgumentException('currency must be an ISO 4217 code (exactly 3 characters).');
-        }
-        if ($counterpartyCountry !== null && strlen($counterpartyCountry) !== 2) {
-            throw new InvalidArgumentException('counterpartyCountry must be an ISO 3166-1 alpha-2 code (exactly 2 characters).');
-        }
+        $currency = $this->normalizeCurrency($currency);
+        $counterpartyCountry = $this->normalizeCountryCode($counterpartyCountry, 'counterpartyCountry');
         if ($internalReference !== null) {
             $this->assertMaxLength($internalReference, 100, 'internalReference');
         }
@@ -1444,6 +1440,65 @@ final class EReportingEndpoint
     {
         if ($id <= 0) {
             throw new InvalidArgumentException(sprintf('%s must be a positive integer.', $param));
+        }
+    }
+
+    /** Three letters, upper-cased; null stays null (the server default applies). */
+    private function normalizeCurrency(?string $currency): ?string
+    {
+        if ($currency === null) {
+            return null;
+        }
+        if (preg_match('/^[A-Za-z]{3}$/', $currency) !== 1) {
+            throw new InvalidArgumentException('currency must be an ISO 4217 code, three letters (e.g. NOK, EUR).');
+        }
+
+        return strtoupper($currency);
+    }
+
+    /** Two letters, upper-cased; null stays null. */
+    private function normalizeCountryCode(?string $country, string $param): ?string
+    {
+        if ($country === null) {
+            return null;
+        }
+        if (preg_match('/^[A-Za-z]{2}$/', $country) !== 1) {
+            throw new InvalidArgumentException(sprintf('%s must be an ISO 3166-1 alpha-2 code, two letters (e.g. NO).', $param));
+        }
+
+        return strtoupper($country);
+    }
+
+    /**
+     * Relations between the dates and the credit-note reference that cannot be right: a due date
+     * before the invoice date, a credit note without (or an invoice with) a corrected invoice, a
+     * credit note that reuses the number it corrects, a corrected invoice dated after the credit note.
+     */
+    private function assertDocumentDates(
+        string $invoiceNumber,
+        DateTimeInterface|string $invoiceDate,
+        DateTimeInterface|string|null $dueDate,
+        ?bool $isCreditNote,
+        ?string $amendedNumber,
+        DateTimeInterface|string|null $amendedDate,
+    ): void {
+        $invoice = $this->formatDate($invoiceDate);
+        if ($dueDate !== null && $this->formatDate($dueDate) < $invoice) {
+            throw new InvalidArgumentException('dueDate must not be before invoiceDate.');
+        }
+
+        $amended = $amendedNumber !== null ? trim($amendedNumber) : '';
+        if ($isCreditNote === true && $amended === '') {
+            throw new InvalidArgumentException('A credit note needs amendedNumber, the number of the invoice it corrects.');
+        }
+        if ($isCreditNote !== true && $amended !== '') {
+            throw new InvalidArgumentException('amendedNumber is only for credit notes; set isCreditNote to issue one.');
+        }
+        if ($amended !== '' && $amended === trim($invoiceNumber)) {
+            throw new InvalidArgumentException('A credit note needs its own number; it cannot reuse the number of the invoice it corrects.');
+        }
+        if ($amendedDate !== null && $this->formatDate($amendedDate) > $invoice) {
+            throw new InvalidArgumentException('amendedDate (the corrected invoice) must not be after the credit note date.');
         }
     }
 

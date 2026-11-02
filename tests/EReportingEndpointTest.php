@@ -671,7 +671,7 @@ final class EReportingEndpointTest extends TestCase
         $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
 
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('currency must be an ISO 4217 code (exactly 3 characters).');
+        $this->expectExceptionMessage('currency must be an ISO 4217 code, three letters');
 
         $endpoint->createTransaction(
             enrollmentId: 12,

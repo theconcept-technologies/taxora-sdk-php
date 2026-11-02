@@ -578,6 +578,19 @@ match ($decision->action) {
 
 #### 3. Send an invoice
 
+The SDK refuses input that cannot be right before any request: unknown tax categories
+(`ComplianceTaxCategory`: `S`, `AA`, `AAA`, `K`, `G`, `AE`, `E`, `Z`), a category `E` line without its
+VATEX exemption code, currency and country codes that are not letters, a due date before the invoice date,
+and credit notes without (or invoices with) a corrected invoice. The API additionally checks that an
+e-invoice's `subtotal`, `taxAmount` and `total` match its lines, so compute them from the lines:
+
+```php
+use Taxora\Sdk\ValueObjects\ComplianceInvoiceTotals;
+
+$totals = ComplianceInvoiceTotals::fromLines($lines);   // subtotal, taxAmount, total as "1000.00" strings
+// createTransaction(..., subtotal: $totals->subtotal, taxAmount: $totals->taxAmount, total: $totals->total, invoiceLines: $lines)
+```
+
 ```php
 use Taxora\Sdk\ValueObjects\ComplianceInvoiceLine;
 use Taxora\Sdk\ValueObjects\ComplianceLineTax;
