@@ -42,6 +42,31 @@ final readonly class ComplianceInvoiceLine
         }
     }
 
+    /**
+     * Rebuild a line from its wire shape (a stored `invoice_lines_attributes` entry,
+     * e.g. {@see ComplianceTransaction::$invoiceLines}).
+     *
+     * @param array<string,mixed> $data
+     */
+    public static function fromArray(array $data): self
+    {
+        $taxes = [];
+        foreach ((array) ($data['taxes_attributes'] ?? []) as $tax) {
+            if (is_array($tax)) {
+                /** @var array<string,mixed> $tax */
+                $taxes[] = ComplianceLineTax::fromArray($tax);
+            }
+        }
+
+        return new self(
+            description: (string) ($data['description'] ?? ''),
+            quantity: is_numeric($data['quantity'] ?? null) ? $data['quantity'] : 0,
+            price: is_numeric($data['price'] ?? null) ? $data['price'] : 0,
+            taxes: $taxes,
+            unit: isset($data['unit']) ? (int) $data['unit'] : null,
+        );
+    }
+
     /** Wire representation (one entry of `invoice_lines_attributes`). @return array<string,mixed> */
     public function toArray(): array
     {

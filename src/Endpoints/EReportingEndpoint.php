@@ -14,6 +14,7 @@ use Psr\Http\Message\RequestFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Taxora\Sdk\Enums\ApiVersion;
+use Taxora\Sdk\Enums\ComplianceDocumentType;
 use Taxora\Sdk\Enums\ComplianceService;
 use Taxora\Sdk\Enums\ComplianceTaxReportState;
 use Taxora\Sdk\Enums\ComplianceTransactionState;
@@ -28,6 +29,7 @@ use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
 use Taxora\Sdk\Support\NorwegianOrgNumber;
 use Taxora\Sdk\ValueObjects\ComplianceCheckoutSession;
+use Taxora\Sdk\ValueObjects\ComplianceDeliveryDecision;
 use Taxora\Sdk\ValueObjects\ComplianceEnrollment;
 use Taxora\Sdk\ValueObjects\ComplianceEnrollmentPage;
 use Taxora\Sdk\ValueObjects\ComplianceImportResult;
@@ -407,6 +409,24 @@ final class EReportingEndpoint
         return PeppolLookupResult::fromArray($this->extractData($this->jsonGet($uri)));
     }
 
+    /**
+     * What to do with an invoice to this buyer: {@see peppolLookup()} turned into an
+     * action, e.g. in a shop checkout when a business buyer enters its number.
+     *
+     *  - EINVOICE: create the transaction, Taxora sends the e-invoice;
+     *  - REGULAR_INVOICE: the buyer is not on the network — send your regular invoice
+     *    yourself (a transaction would end as not_required and is not billed);
+     *  - EINVOICE_PENDING: no definite answer yet — create the transaction anyway,
+     *    Taxora asks the directory again before sending.
+     *
+     *   $decision = $client->eReporting()->decideDelivery('NO', '923609016');
+     *   if ($decision->action === ComplianceDeliveryAction::REGULAR_INVOICE) { ... }
+     */
+    public function decideDelivery(string $country, string $id, ?string $scheme = null): ComplianceDeliveryDecision
+    {
+        return ComplianceDeliveryDecision::fromLookup($this->peppolLookup($country, $id, $scheme));
+    }
+
     // ---------------------------------------------------------------------
     // Transactions
     // ---------------------------------------------------------------------
@@ -537,6 +557,104 @@ final class EReportingEndpoint
         $payload = $this->jsonPost($this->uri('/compliance/transactions'), $body);
 
         return ComplianceTransaction::fromArray($this->extractData($payload));
+    }
+
+    /**
+     * Issue a credit note for an invoice you sent through Taxora. Everything that
+     * must match the corrected invoice is taken from $original: enrollment,
+     * transaction type, currency, buyer (name, register id, address, e-mail, VAT
+     * number, buyer reference) — and the reference to the corrected invoice
+     * (number and date) is set for you, so the credit note cannot point nowhere.
+     *
+     * Without further arguments it credits the whole invoice: lines and amounts are
+     * taken over from $original as they are (the document type, not the sign, makes it
+     * a credit note). For a partial credit pass $invoiceLines together with
+     * $subtotal, $taxAmount and $total (all four or none).
+     *
+     * Not possible for an invoice that was never sent to the buyer
+     * (state not_required: the buyer is not on the network) or for a credit note.
+     *
+     * A buyer rejected the invoice? Correct it with a credit note and send a new
+     * invoice ({@see ComplianceTransaction::$buyerRejected}).
+     *
+     * @param ComplianceTransaction $original the invoice to credit, as returned by getTransaction()/createTransaction()
+     * @param string $creditNoteNumber the credit note's own number (max 50 characters)
+     * @param DateTimeInterface|string|null $invoiceDate defaults to today
+     * @param list<ComplianceInvoiceLine>|null $invoiceLines partial credit: the credited lines
+     */
+    public function createCreditNote(
+        ComplianceTransaction $original,
+        string $creditNoteNumber,
+        DateTimeInterface|string|null $invoiceDate = null,
+        ?array $invoiceLines = null,
+        float|int|string|null $subtotal = null,
+        float|int|string|null $taxAmount = null,
+        float|int|string|null $total = null,
+        ?string $extraInfo = null,
+        ?string $internalReference = null,
+        ?string $invoicePdf = null,
+        ?string $invoicePdfFilename = null,
+        ?bool $submitNow = null,
+    ): ComplianceTransaction {
+        if ($original->complianceEnrollmentId === null) {
+            throw new InvalidArgumentException('The original transaction has no enrollment; load it with getTransaction().');
+        }
+        if ($original->documentType === ComplianceDocumentType::CREDIT_NOTE) {
+            throw new InvalidArgumentException('A credit note cannot be credited again; issue a new invoice instead.');
+        }
+        if ($original->state === ComplianceTransactionState::NOT_REQUIRED) {
+            throw new InvalidArgumentException('The invoice was never sent as an e-invoice (the buyer is not on the network), so there is nothing to credit; correct your regular invoice instead.');
+        }
+        if ($original->invoiceNumber === null || $original->invoiceNumber === '') {
+            throw new InvalidArgumentException('The original transaction has no invoice number.');
+        }
+
+        $partial = [$invoiceLines, $subtotal, $taxAmount, $total];
+        if (!in_array(count(array_filter($partial, static fn ($v) => $v !== null)), [0, 4], true)) {
+            throw new InvalidArgumentException('For a partial credit pass invoiceLines, subtotal, taxAmount and total together.');
+        }
+
+        if ($invoiceLines === null) {
+            $invoiceLines = array_map(
+                static fn (array $line): ComplianceInvoiceLine => ComplianceInvoiceLine::fromArray($line),
+                $original->invoiceLines,
+            );
+            if ($invoiceLines === []) {
+                throw new InvalidArgumentException('The original transaction carries no invoice lines; pass invoiceLines and the amounts explicitly.');
+            }
+            $subtotal = $original->subtotal;
+            $taxAmount = $original->taxAmount;
+            $total = $original->total;
+        }
+
+        return $this->createTransaction(
+            enrollmentId: $original->complianceEnrollmentId,
+            transactionType: $original->transactionType,
+            invoiceNumber: $creditNoteNumber,
+            invoiceDate: $invoiceDate ?? new DateTimeImmutable('today'),
+            subtotal: $subtotal ?? '0',
+            total: $total ?? '0',
+            invoiceLines: $invoiceLines,
+            currency: $original->currency,
+            taxAmount: $taxAmount,
+            counterpartyName: $original->counterpartyName,
+            counterpartyCountry: $original->counterpartyCountry,
+            counterpartyVatNumber: $original->counterpartyVatNumber,
+            submitNow: $submitNow,
+            counterpartyRegisterId: $original->counterpartyRegisterId,
+            counterpartyAddress: $original->counterpartyAddress,
+            counterpartyCity: $original->counterpartyCity,
+            counterpartyPostalcode: $original->counterpartyPostalcode,
+            counterpartyEmail: $original->counterpartyEmail,
+            buyerReference: $original->buyerReference,
+            isCreditNote: true,
+            amendedNumber: $original->invoiceNumber,
+            amendedDate: $original->invoiceDate,
+            extraInfo: $extraInfo,
+            invoicePdf: $invoicePdf,
+            invoicePdfFilename: $invoicePdfFilename,
+            internalReference: $internalReference,
+        );
     }
 
     /**

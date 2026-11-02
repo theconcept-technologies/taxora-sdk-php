@@ -17,6 +17,7 @@ use Taxora\Sdk\Http\ApiKeyMiddleware;
 use Taxora\Sdk\Http\AuthMiddleware;
 use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
+use Taxora\Sdk\ValueObjects\EInvoicingQuota;
 use Taxora\Sdk\ValueObjects\UsageSummary;
 use Taxora\Sdk\ValueObjects\UsageSummaryPage;
 use Throwable;
@@ -93,6 +94,37 @@ final class BillingEndpoint
         }
 
         return $summaries;
+    }
+
+    /**
+     * The e-invoicing allowance: documents included per month, used, still free and
+     * what is due for the documents beyond it — one pool over all e-invoicing
+     * countries, current month first, then up to $months - 1 earlier months.
+     * Returns null when the company has no e-invoicing.
+     *
+     *   $quota = $client->billing()->getEInvoicingQuota();
+     *   $quota?->current->freeRemaining;
+     */
+    public function getEInvoicingQuota(int $months = 6): ?EInvoicingQuota
+    {
+        if ($months < 1 || $months > 24) {
+            throw new InvalidArgumentException('months must be between 1 and 24.');
+        }
+
+        $payload = $this->jsonGet(sprintf(
+            '%s/%s/billing/einvoicing-quota?months=%d',
+            $this->baseUrl,
+            $this->apiVersion->value,
+            $months,
+        ));
+
+        $data = $payload['data'] ?? null;
+        if (!is_array($data) || $data === []) {
+            return null;
+        }
+
+        /** @var array<string,mixed> $data */
+        return EInvoicingQuota::fromArray($data);
     }
 
     // ---------------------------------------------------------------------

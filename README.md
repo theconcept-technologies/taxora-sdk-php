@@ -562,6 +562,20 @@ if ($peppol->status->isSuccess()) {           // reachable: buyer is in ELMA →
 }
 ```
 
+Or let the SDK turn the answer into an action (shop checkout, one call):
+
+```php
+use Taxora\Sdk\Enums\ComplianceDeliveryAction;
+
+$decision = $client->eReporting()->decideDelivery('NO', '974760673');
+
+match ($decision->action) {
+    ComplianceDeliveryAction::EINVOICE         => /* create the transaction, Taxora sends the e-invoice */ null,
+    ComplianceDeliveryAction::EINVOICE_PENDING => /* no answer yet: create it anyway, Taxora asks again before sending */ null,
+    ComplianceDeliveryAction::REGULAR_INVOICE  => /* not on Peppol: send your usual invoice, nothing is billed */ null,
+};
+```
+
 #### 3. Send an invoice
 
 ```php
@@ -623,6 +637,18 @@ $credit = $client->eReporting()->createTransaction(
 );
 
 var_dump($credit->isCreditNote());            // true (documentType = ComplianceDocumentType::CREDIT_NOTE)
+
+// Shorter and harder to get wrong: credit an invoice you already sent. Buyer, lines, amounts,
+// currency and the reference to the corrected invoice are taken from it.
+$credit = $client->eReporting()->createCreditNote($tx, creditNoteNumber: 'NO-CN-2026-0001');
+
+// Partial credit: pass the credited lines and all amounts together.
+$credit = $client->eReporting()->createCreditNote(
+    $tx,
+    'NO-CN-2026-0002',
+    invoiceLines: [new ComplianceInvoiceLine('Consulting', 2, 100, [new ComplianceLineTax('MVA', 25, 'S')])],
+    subtotal: 200, taxAmount: 50, total: 250,
+);
 
 // Only the Norwegian transactions of one enrollment:
 $page = $client->eReporting()->listTransactions(complianceEnrollmentId: $enrollment->id, country: 'NO');
@@ -783,6 +809,13 @@ foreach ($client->billing()->getUsageSummaries('2026-09') as $summary) {
         echo $event->resourceType . ' #' . $event->resourceId . PHP_EOL;   // e.g. compliance_transaction #88
     }
 }
+```
+
+E-invoicing allowance (documents included per month, used, still free, what is due beyond it; `null` without e-invoicing):
+
+```php
+$quota = $client->billing()->getEInvoicingQuota();
+echo $quota?->current->freeRemaining . ' of ' . $quota?->current->included . ' documents free this month';
 ```
 
 `company()->get()` returns the raw company payload. New company limit fields are exposed as `api_rate_limit` and `vat_rate_limit`. The legacy `rate_limit` field may still appear temporarily for backward compatibility, but it should be treated as deprecated.

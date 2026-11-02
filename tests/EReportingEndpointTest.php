@@ -7,6 +7,7 @@ use Http\Factory\Guzzle\RequestFactory;
 use Http\Factory\Guzzle\StreamFactory;
 use PHPUnit\Framework\TestCase;
 use Taxora\Sdk\Endpoints\EReportingEndpoint;
+use Taxora\Sdk\Enums\ComplianceDeliveryAction;
 use Taxora\Sdk\Enums\ApiVersion;
 use Taxora\Sdk\Enums\ComplianceDocumentType;
 use Taxora\Sdk\Enums\ComplianceEnrollmentStatus;
@@ -3121,6 +3122,113 @@ final class EReportingEndpointTest extends TestCase
             price: 100,
             taxes: [new ComplianceLineTax(name: 'TVA', percent: 20, category: 'S')],
         );
+    }
+
+    /* ---------- credit notes & delivery decision ---------- */
+
+    public function testCreateCreditNoteCopiesBuyerLinesAndReferencesTheInvoice(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::norwayTransactionPayload(['id' => 99, 'invoice_number' => 'GS-1', 'document_type' => 'credit_note', 'amended_number' => 'NO-2026-0001']),
+            ])),
+        ]);
+        $original = ComplianceTransaction::fromArray(self::norwayTransactionPayload());
+
+        $creditNote = $this->createEndpoint($http)->createCreditNote($original, 'GS-1', '2026-10-01', internalReference: 'RMA-5');
+
+        self::assertSame(ComplianceDocumentType::CREDIT_NOTE, $creditNote->documentType);
+        $body = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame(21, $body['compliance_enrollment_id']);
+        self::assertSame('b2b_domestic_outbound', $body['transaction_type']);
+        self::assertSame('GS-1', $body['invoice_number']);
+        self::assertSame('2026-10-01', $body['invoice_date']);
+        self::assertSame('NOK', $body['currency']);
+        self::assertTrue($body['is_credit_note']);
+        self::assertSame('NO-2026-0001', $body['amended_number']);
+        self::assertSame('2026-09-25', $body['amended_date']);
+        self::assertSame('923609016', $body['counterparty_register_id']);
+        self::assertSame('EQUINOR ASA', $body['counterparty_name']);
+        self::assertSame('PO-4711', $body['buyer_reference']);
+        self::assertSame('1250.0000', (string) $body['total']);
+        self::assertSame('Consulting', $body['invoice_lines_attributes'][0]['description']);
+        self::assertSame('MVA', $body['invoice_lines_attributes'][0]['taxes_attributes'][0]['name']);
+        self::assertSame('RMA-5', $body['internal_reference']);
+    }
+
+    public function testCreateCreditNoteForPartAcceptsExplicitLinesAndAmounts(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode(['success' => true, 'data' => self::norwayTransactionPayload(['id' => 100])])),
+        ]);
+        $original = ComplianceTransaction::fromArray(self::norwayTransactionPayload());
+
+        $this->createEndpoint($http)->createCreditNote(
+            $original,
+            'GS-2',
+            '2026-10-01',
+            invoiceLines: [new ComplianceInvoiceLine('Consulting', 2, 100, [new ComplianceLineTax('MVA', 25, 'S')])],
+            subtotal: 200,
+            taxAmount: 50,
+            total: 250,
+        );
+
+        $body = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertEquals(250, $body['total']);
+        self::assertEquals(2, $body['invoice_lines_attributes'][0]['quantity']);
+    }
+
+    public function testCreateCreditNoteRejectsPartialArgumentsWithoutSendingARequest(): void
+    {
+        $http = new SequenceHttpClient([]);
+        $original = ComplianceTransaction::fromArray(self::norwayTransactionPayload());
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('invoiceLines, subtotal, taxAmount and total together');
+        try {
+            $this->createEndpoint($http)->createCreditNote($original, 'GS-3', total: 10);
+        } finally {
+            self::assertCount(0, $http->requests);
+        }
+    }
+
+    public function testCreateCreditNoteRefusesNotRequiredInvoicesAndCreditNotes(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        foreach ([
+            ['state' => 'not_required'],
+            ['document_type' => 'credit_note'],
+        ] as $overrides) {
+            try {
+                $endpoint->createCreditNote(ComplianceTransaction::fromArray(self::norwayTransactionPayload($overrides)), 'GS-4');
+                self::fail('Expected InvalidArgumentException for ' . json_encode($overrides));
+            } catch (InvalidArgumentException) {
+                self::assertTrue(true);
+            }
+        }
+    }
+
+    public function testDecideDeliveryMapsTheDirectoryAnswerToAnAction(): void
+    {
+        foreach ([
+            ['reachable', true, ComplianceDeliveryAction::EINVOICE],
+            ['not_reachable', false, ComplianceDeliveryAction::REGULAR_INVOICE],
+            ['pending', null, ComplianceDeliveryAction::EINVOICE_PENDING],
+        ] as [$status, $reachable, $expected]) {
+            $http = new SequenceHttpClient([
+                new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                    'success' => true,
+                    'data' => ['status' => $status, 'reachable' => $reachable, 'country' => 'NO', 'scheme' => '0192', 'id' => '923609016', 'document_types' => []],
+                ])),
+            ]);
+
+            $decision = $this->createEndpoint($http)->decideDelivery('NO', '923609016');
+
+            self::assertSame($expected, $decision->action);
+            self::assertSame($status, $decision->lookup->status->value);
+        }
     }
 
     /**

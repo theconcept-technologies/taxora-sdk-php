@@ -94,7 +94,7 @@ final class BillingEndpointTest extends TestCase
     {
         $http = new SequenceHttpClient([]);
 
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
         try {
             $this->createEndpoint($http)->getUsageSummaries('2026-13');
         } finally {
@@ -158,6 +158,60 @@ final class BillingEndpointTest extends TestCase
             'created_at' => '2026-09-01T00:00:00+00:00',
             'updated_at' => '2026-09-30T00:00:00+00:00',
         ], $overrides);
+    }
+
+    public function testGetEInvoicingQuotaParsesTheCurrentMonthAndHistory(): void
+    {
+        $period = [
+            'period' => '2026-12', 'used' => 72, 'included' => 50, 'free_used' => 50, 'free_remaining' => 0,
+            'billable_units' => 22, 'amount' => '10.78', 'monthly_fee' => '129.00', 'total' => '139.78',
+            'state' => 'open', 'by_country' => [['country' => 'NO', 'used' => 72]], 'billed_at' => null,
+            'manual_reference' => null, 'monthly_fee_reference' => null,
+        ];
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => [
+                    'billing' => 'invoice', 'plan' => null, 'currency' => 'EUR', 'included' => 50,
+                    'tiers' => [['up_to' => 50, 'unit_price' => '0.0000'], ['up_to' => null, 'unit_price' => '0.4900']],
+                    'countries' => ['NO'], 'monthly_fee' => '129.00',
+                    'current' => $period,
+                    'history' => [array_merge($period, ['period' => '2026-11', 'state' => 'billed', 'manual_reference' => 'RE-1042'])],
+                ],
+            ])),
+        ]);
+
+        $quota = $this->createEndpoint($http)->getEInvoicingQuota(months: 3);
+
+        self::assertSame('/v1/billing/einvoicing-quota', $http->requests[0]->getUri()->getPath());
+        self::assertSame('months=3', $http->requests[0]->getUri()->getQuery());
+        self::assertNotNull($quota);
+        self::assertSame('invoice', $quota->billing);
+        self::assertSame(50, $quota->included);
+        self::assertSame(['NO'], $quota->countries);
+        self::assertSame('0.4900', $quota->tiers[1]['unit_price']);
+        self::assertNull($quota->tiers[1]['up_to']);
+        self::assertSame(0, $quota->current->freeRemaining);
+        self::assertSame(22, $quota->current->billableUnits);
+        self::assertSame('139.78', $quota->current->total);
+        self::assertSame(['NO' => 72], $quota->current->byCountry);
+        self::assertSame('RE-1042', $quota->history[0]->manualReference);
+    }
+
+    public function testGetEInvoicingQuotaIsNullWithoutEInvoicing(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode(['success' => true, 'data' => null])),
+        ]);
+
+        self::assertNull($this->createEndpoint($http)->getEInvoicingQuota());
+    }
+
+    public function testGetEInvoicingQuotaRejectsAnOutOfRangeMonthCount(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->createEndpoint(new SequenceHttpClient([]))->getEInvoicingQuota(months: 25);
     }
 
     private function createEndpoint(SequenceHttpClient $http, ?RetryPolicy $retryPolicy = null): BillingEndpoint
