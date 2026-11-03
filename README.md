@@ -591,7 +591,7 @@ $totals = ComplianceInvoiceTotals::fromLines($lines);   // subtotal, taxAmount, 
 // createTransaction(..., subtotal: $totals->subtotal, taxAmount: $totals->taxAmount, total: $totals->total, invoiceLines: $lines)
 ```
 
-Taxes without remembering category codes: `ComplianceLineTax::rate(25)` (category `S`, any rate above 0 %),
+Taxes without remembering category codes: `ComplianceLineTax::rate(25)` (category `S`, any rate above 0 %; in Norway 25/15/12 % are all `S`, for France's reduced rates pass `category: 'AA'` / `'AAA'`),
 `zeroRated()` (`Z`), `exempt('VATEX-EU-132')` (`E`, code mandatory) and `reverseCharge()` (`AE`). The rate itself is yours
 to know; the API checks it against the country's catalogue. The tax name defaults to `VAT` (`rate(25, name: 'MVA')`).
 

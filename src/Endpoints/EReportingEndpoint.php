@@ -529,6 +529,7 @@ final class EReportingEndpoint
             $amendedNumber,
             $amendedDate,
             $extraInfo,
+            $counterpartyCountry,
         );
 
         $body = array_filter([
@@ -851,6 +852,7 @@ final class EReportingEndpoint
             $amendedNumber,
             $amendedDate,
             $extraInfo,
+            $counterpartyCountry,
         ) + $this->invoicePdfFields($invoicePdf, $invoicePdfFilename);
 
         if ($body === []) {
@@ -1589,15 +1591,16 @@ final class EReportingEndpoint
         ?string $amendedNumber,
         DateTimeInterface|string|null $amendedDate,
         ?string $extraInfo,
+        ?string $counterpartyCountry = null,
     ): array {
         if ($counterpartyRegisterId !== null) {
             if (trim($counterpartyRegisterId) === '') {
                 throw new InvalidArgumentException('counterpartyRegisterId must not be empty.');
             }
             $this->assertMaxLength($counterpartyRegisterId, 30, 'counterpartyRegisterId');
-            // Number-shaped ids are Norwegian organisation numbers today — catch a
-            // wrong check digit before the server does.
-            if (preg_match('/^\d{9}$/', NorwegianOrgNumber::normalize($counterpartyRegisterId)) === 1) {
+            // A Norwegian buyer's id is an organisation number — catch a wrong check digit before
+            // the server does. Other countries' ids (e.g. a French SIREN) are not checked here.
+            if ($counterpartyCountry === 'NO') {
                 $counterpartyRegisterId = $this->norwegianOrgNumber($counterpartyRegisterId, 'counterpartyRegisterId');
             }
         }

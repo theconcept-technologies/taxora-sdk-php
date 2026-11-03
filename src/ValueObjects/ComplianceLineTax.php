@@ -48,16 +48,21 @@ final readonly class ComplianceLineTax
     }
 
     /**
-     * A taxed rate above 0 % (category S). The rate is the seller's to know — it is checked against the
-     * country's catalogue by the API. For 0 % use {@see zeroRated()}, {@see exempt()} or {@see reverseCharge()}.
+     * A taxed rate above 0 %, category S (Norway: 25 / 15 / 12 % are all S). The rate is the seller's to know —
+     * the API checks it against the country's catalogue. Where a country files reduced rates under their own
+     * category (France: AA / AAA), pass it as `$category`. For 0 % use {@see zeroRated()}, {@see exempt()} or
+     * {@see reverseCharge()}.
      */
-    public static function rate(float|int|string $percent, string $name = 'VAT'): self
-    {
+    public static function rate(
+        float|int|string $percent,
+        string $name = 'VAT',
+        ComplianceTaxCategory|string $category = ComplianceTaxCategory::STANDARD,
+    ): self {
         if (!is_numeric($percent) || (float) $percent <= 0) {
             throw new InvalidArgumentException('rate() needs a percent above 0; for 0 % use zeroRated(), exempt() or reverseCharge().');
         }
 
-        return new self($name, $percent, ComplianceTaxCategory::STANDARD);
+        return new self($name, $percent, $category);
     }
 
     /** 0 % but taxable (category Z). */

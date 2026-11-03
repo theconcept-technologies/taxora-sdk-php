@@ -1700,6 +1700,31 @@ final class EReportingEndpointTest extends TestCase
         self::assertNull($tx->providerState);
     }
 
+    public function testCreateTransactionDoesNotCheckNonNorwegianBuyerIdsAsOrgNumbers(): void
+    {
+        $this->expectNotToPerformAssertions();
+        $http = new SequenceHttpClient([new Response(201, [], json_encode(['data' => ['id' => 1]], JSON_THROW_ON_ERROR))]);
+
+        try {
+            $this->createEndpoint($http)->createTransaction(
+                enrollmentId: 21,
+                transactionType: 'b2b_domestic_outbound',
+                invoiceNumber: 'FR-1',
+                invoiceDate: '2026-09-25',
+                currency: 'EUR',
+                subtotal: 10,
+                taxAmount: 2,
+                total: 12,
+                counterpartyCountry: 'FR',
+                counterpartyRegisterId: '552100554',
+            );
+        } catch (InvalidArgumentException $e) {
+            self::fail('A French SIREN must not be checked as a Norwegian organisation number: ' . $e->getMessage());
+        } catch (Throwable) {
+            // the rest of the response mapping is irrelevant here
+        }
+    }
+
     public function testCreateTransactionRejectsInvalidCounterpartyOrgNumber(): void
     {
         $http = new SequenceHttpClient([]);
@@ -1713,6 +1738,7 @@ final class EReportingEndpointTest extends TestCase
                 subtotal: 1000,
                 total: 1250,
                 invoiceLines: [self::norwayLine()],
+                counterpartyCountry: 'NO',
                 counterpartyRegisterId: '923609017',
             );
             self::fail('Expected InvalidArgumentException was not thrown.');
