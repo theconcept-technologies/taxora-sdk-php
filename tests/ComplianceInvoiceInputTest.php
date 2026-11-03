@@ -167,4 +167,44 @@ final class ComplianceInvoiceInputTest extends TestCase
             apiVersion: ApiVersion::V1,
         );
     }
+
+    public function testTaxFactoriesSetTheRightCategory(): void
+    {
+        self::assertSame(['S', 25], [ComplianceLineTax::rate(25)->category, ComplianceLineTax::rate(25)->percent]);
+        self::assertSame('Z', ComplianceLineTax::zeroRated()->category);
+        self::assertSame('AE', ComplianceLineTax::reverseCharge()->category);
+
+        $exempt = ComplianceLineTax::exempt('VATEX-EU-132');
+        self::assertSame('E', $exempt->category);
+        self::assertSame('VATEX-EU-132', $exempt->comment);
+    }
+
+    public function testRateRefusesZeroAndExemptNeedsACode(): void
+    {
+        try {
+            ComplianceLineTax::rate(0);
+            self::fail('rate(0) must be refused');
+        } catch (InvalidArgumentException $e) {
+            self::assertStringContainsString('zeroRated()', $e->getMessage());
+        }
+
+        $this->expectException(InvalidArgumentException::class);
+        ComplianceLineTax::exempt(' ');
+    }
+
+    public function testExpectedTotalReportsRoundingAndRefusesRealDifferences(): void
+    {
+        $lines = [new ComplianceInvoiceLine(description: 'A', quantity: 3, price: 33.33, taxes: [ComplianceLineTax::rate(25)])];
+
+        $totals = ComplianceInvoiceTotals::fromLines($lines, expectedTotal: 124.99);
+        self::assertSame('124.99', $totals->total);
+        self::assertSame('0.00', $totals->roundingDifference);
+
+        $off = ComplianceInvoiceTotals::fromLines($lines, expectedTotal: '125.02');
+        self::assertSame('0.03', $off->roundingDifference);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('differs from the invoice lines');
+        ComplianceInvoiceTotals::fromLines($lines, expectedTotal: 130.00);
+    }
 }

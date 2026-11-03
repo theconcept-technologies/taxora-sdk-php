@@ -48,6 +48,37 @@ final readonly class ComplianceLineTax
     }
 
     /**
+     * A taxed rate above 0 % (category S). The rate is the seller's to know — it is checked against the
+     * country's catalogue by the API. For 0 % use {@see zeroRated()}, {@see exempt()} or {@see reverseCharge()}.
+     */
+    public static function rate(float|int|string $percent, string $name = 'VAT'): self
+    {
+        if (!is_numeric($percent) || (float) $percent <= 0) {
+            throw new InvalidArgumentException('rate() needs a percent above 0; for 0 % use zeroRated(), exempt() or reverseCharge().');
+        }
+
+        return new self($name, $percent, ComplianceTaxCategory::STANDARD);
+    }
+
+    /** 0 % but taxable (category Z). */
+    public static function zeroRated(string $name = 'VAT'): self
+    {
+        return new self($name, 0, ComplianceTaxCategory::ZERO);
+    }
+
+    /** Exempt from VAT (category E); the VATEX exemption code is mandatory. */
+    public static function exempt(string $exemptionCode, string $name = 'VAT'): self
+    {
+        return new self($name, 0, ComplianceTaxCategory::EXEMPT, $exemptionCode);
+    }
+
+    /** Reverse charge (category AE); the mandatory legal text is added by Taxora. */
+    public static function reverseCharge(string $name = 'VAT'): self
+    {
+        return new self($name, 0, ComplianceTaxCategory::REVERSE_CHARGE);
+    }
+
+    /**
      * Rebuild a tax from its wire shape (a stored `taxes_attributes` entry).
      *
      * @param array<string,mixed> $data
