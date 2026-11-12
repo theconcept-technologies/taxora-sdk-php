@@ -509,7 +509,8 @@ $client->eReporting()->requestEReportingAccess(
 Compliance services are booked **per country**: each enrollment covers one
 country and one service — France offers e-reporting (and e-invoicing) via DGFiP
 Flux 10 (`regime: dgfip_flux10`), Norway offers e-invoicing via EHF 3.0 =
-Peppol BIS Billing 3.0 (`regime: peppol_bis3`). `$enrollment->service` tells you
+Peppol BIS Billing 3.0 (`regime: peppol_bis3`); Germany and the Peppol countries
+BE, NL, AT, IE, DK, SE, FI, EE, GB follow [below](#-e-invoicing-germany-zugferd--xrechnung). `$enrollment->service` tells you
 which service an enrollment books (`ComplianceService::E_REPORTING` /
 `E_INVOICING`). Billing is per country as well: Norway is charged a one-off setup
 fee when the country is activated plus a price per document sent.
@@ -753,6 +754,110 @@ if ($tx->hasPdf()) {
 ```
 
 No PDF available (yet) → `HttpException` with status `409`.
+
+### 🇩🇪 E-Invoicing Germany (ZUGFeRD / XRechnung)
+
+Germany issues EN 16931 e-invoices (§ 14 UStG) for **domestic** buyers (seller and buyer
+both in Germany). Each invoice goes out as **ZUGFeRD** (Factur-X EN 16931, PDF/A-3 with
+embedded XML — the default) or **XRechnung 3.0** (`ComplianceEInvoiceFormat`), and is
+delivered **by e-mail** to the buyer, or — with `delivery: 'download'` — not sent at all,
+so you fetch the file and pass it on yourself (`ComplianceInvoiceDelivery`). A public
+buyer's **Leitweg-ID** in `buyerReference` always makes it an XRechnung sent over Peppol.
+
+```php
+use Taxora\Sdk\Enums\ComplianceEInvoiceFormat;
+use Taxora\Sdk\Enums\ComplianceInvoiceDelivery;
+use Taxora\Sdk\ValueObjects\ComplianceInvoiceLine;
+use Taxora\Sdk\ValueObjects\ComplianceInvoiceTotals;
+use Taxora\Sdk\ValueObjects\ComplianceLineTax;
+
+$enrollment = $client->eReporting()->createGermanyEnrollment(
+    email: 'rechnung@beispiel.de',           // notification e-mail (also gets "download" copies)
+    vatNumber: 'DE123456789',                // DE + 9 digits, checked before any request
+    companyName: 'Beispiel GmbH',
+    address: 'Hauptstraße 1',
+    city: 'Berlin',
+    postalcode: '10115',
+);
+
+$lines  = [new ComplianceInvoiceLine('Beratung', 10, 100, [ComplianceLineTax::rate(19)])];
+$totals = ComplianceInvoiceTotals::fromLines($lines);
+
+$tx = $client->eReporting()->createTransaction(
+    enrollmentId: $enrollment->id,
+    transactionType: 'b2b_domestic_outbound',     // the only type for Germany
+    invoiceNumber: 'RE-2027-0001',
+    invoiceDate: '2027-01-15',
+    currency: 'EUR',
+    subtotal: $totals->subtotal,
+    taxAmount: $totals->taxAmount,
+    total: $totals->total,
+    invoiceLines: $lines,
+    counterpartyName: 'Kunde GmbH',               // name + full address are required (§ 14 UStG)
+    counterpartyCountry: 'DE',
+    counterpartyAddress: 'Marktplatz 2',
+    counterpartyCity: 'München',
+    counterpartyPostalcode: '80331',
+    counterpartyEmail: 'buchhaltung@kunde.de',    // required unless delivery is "download" or a Leitweg-ID is set
+    counterpartyVatNumber: 'DE987654321',         // required for reverse-charge (AE) lines
+    eInvoiceFormat: ComplianceEInvoiceFormat::ZUGFERD,   // default; or XRECHNUNG
+    delivery: ComplianceInvoiceDelivery::EMAIL,          // default; DOWNLOAD = no mail to the buyer
+);
+
+// Public buyer (B2G): XRechnung over Peppol, addressed by the Leitweg-ID — no e-mail needed.
+// createTransaction(..., buyerReference: '04011000-1234512345-06')
+
+// delivery: 'download' → fetch the legal document once submitted and hand it over yourself:
+// $client->eReporting()->getTransactionDocument($tx->id)->saveTo('/archive/RE-2027-0001.pdf');
+```
+
+`eInvoiceFormat` and `delivery` exist for Germany only; the SDK refuses them for a buyer
+outside Germany. Credit notes work as for Norway (`isCreditNote` + `amendedNumber`, or
+`createCreditNote($tx, 'GS-2027-0001')`, which also takes `eInvoiceFormat` / `delivery`).
+
+### 🇧🇪 E-Invoicing over Peppol (BE, NL, AT, IE, DK, SE, FI, EE, GB)
+
+These countries send **Peppol BIS Billing 3.0** (`regime: peppol_bis3`, like Norway).
+The company and every buyer are addressed by their **Peppol id**: `"scheme:value"`, or just
+the value under the country's usual scheme — BE `0208` (enterprise number), NL `0106`,
+AT `9914`, IE `9935`, DK `0184`, SE `0007`, FI `0216`, EE `0191`, GB `9932`
+(`Taxora\Sdk\Support\PeppolId::DEFAULT_SCHEMES`, with `parse()` / `format()` helpers).
+
+```php
+$enrollment = $client->eReporting()->createPeppolEnrollment(
+    country: 'BE',
+    email: 'facturen@voorbeeld.be',
+    vatNumber: 'BE0123456749',               // with the country prefix
+    peppolId: '0123456749',                  // sent as 0208:0123456749; registered on Peppol at activation
+    companyName: 'Voorbeeld BV',
+    address: 'Grote Markt 1',
+    city: 'Brussel',
+    postalcode: '1000',
+    reception: false,                        // true = also receive e-invoices over Peppol
+);
+
+$lines  = [new ComplianceInvoiceLine('Advies', 1, 1000, [ComplianceLineTax::rate(21)])];
+$totals = ComplianceInvoiceTotals::fromLines($lines);
+
+$tx = $client->eReporting()->createTransaction(
+    enrollmentId: $enrollment->id,
+    transactionType: 'b2b_domestic_outbound',   // or crossborder_outbound
+    invoiceNumber: 'BE-2026-0001',
+    invoiceDate: '2026-11-12',
+    currency: 'EUR',
+    subtotal: $totals->subtotal,
+    taxAmount: $totals->taxAmount,
+    total: $totals->total,
+    invoiceLines: $lines,
+    counterpartyName: 'Koper NV',                // required
+    counterpartyCountry: 'BE',
+    counterpartyRegisterId: '0208:0987654321',   // buyer's Peppol id — required (bare value = buyer country's scheme)
+    counterpartyVatNumber: 'BE0987654321',       // required for reverse-charge (AE) lines
+    buyerReference: 'PO-4711',                   // defaults to the Peppol id's value
+);
+```
+
+Credit notes, your own PDF, `not_required` and the document download work as described for Norway above.
 
 ### 🛒 Self-service plans (checkout)
 

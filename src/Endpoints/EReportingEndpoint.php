@@ -15,6 +15,8 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 use Taxora\Sdk\Enums\ApiVersion;
 use Taxora\Sdk\Enums\ComplianceDocumentType;
+use Taxora\Sdk\Enums\ComplianceEInvoiceFormat;
+use Taxora\Sdk\Enums\ComplianceInvoiceDelivery;
 use Taxora\Sdk\Enums\ComplianceService;
 use Taxora\Sdk\Enums\ComplianceTaxReportState;
 use Taxora\Sdk\Enums\ComplianceTransactionState;
@@ -28,6 +30,7 @@ use Taxora\Sdk\Http\AuthMiddleware;
 use Taxora\Sdk\Http\RetryPolicy;
 use Taxora\Sdk\Http\TokenStorageInterface;
 use Taxora\Sdk\Support\NorwegianOrgNumber;
+use Taxora\Sdk\Support\PeppolId;
 use Taxora\Sdk\ValueObjects\ComplianceCheckoutSession;
 use Taxora\Sdk\ValueObjects\ComplianceDeliveryDecision;
 use Taxora\Sdk\ValueObjects\ComplianceEnrollment;
@@ -53,7 +56,9 @@ use Throwable;
  * Compliance endpoints: e-reporting / e-invoicing per country.
  *
  * Each enrollment books one service for one country — France: e-reporting (or
- * e-invoicing) via DGFiP Flux 10; Norway: e-invoicing via EHF / Peppol BIS 3.0.
+ * e-invoicing) via DGFiP Flux 10; Norway: e-invoicing via EHF / Peppol BIS 3.0;
+ * Germany: e-invoicing as ZUGFeRD / XRechnung (EN 16931); BE, NL, AT, IE, DK,
+ * SE, FI, EE, GB: e-invoicing via Peppol BIS 3.0.
  *
  * Typical flow (France):
  *
@@ -68,6 +73,11 @@ use Throwable;
  *   $enrollment = $client->eReporting()->createNorwayEnrollment(orgNumber: ..., ...);
  *   $peppol     = $client->eReporting()->peppolLookup('NO', $buyerOrgNumber);
  *   $tx         = $client->eReporting()->createTransaction(..., counterpartyRegisterId: $buyerOrgNumber);
+ *
+ * Germany: {@see createGermanyEnrollment()}, then createTransaction() with the
+ * buyer's address + e-mail ($eInvoiceFormat / $delivery optional). Peppol
+ * countries: {@see createPeppolEnrollment()}, then createTransaction() with the
+ * buyer's Peppol id in $counterpartyRegisterId.
  *
  * All endpoints except {@see requestEReportingAccess()} and the self-service
  * checkout calls require an active e-reporting or e-invoicing feature grant /
@@ -91,6 +101,10 @@ final class EReportingEndpoint
     ];
     private const TRANSACTION_STATES = ['pending', 'sending', 'submitted', 'error', 'not_required'];
     private const SERVICES = ['e_reporting', 'e_invoicing'];
+    private const E_INVOICE_FORMATS = ['zugferd', 'xrechnung'];
+    private const INVOICE_DELIVERIES = ['email', 'download'];
+    /** E-invoicing countries served over plain Peppol BIS 3.0 ({@see createPeppolEnrollment()}). */
+    public const PEPPOL_COUNTRIES = ['BE', 'NL', 'AT', 'IE', 'DK', 'SE', 'FI', 'EE', 'GB'];
     private const NOTIFICATION_LANGUAGES = ['de', 'en'];
     private const NOTIFICATION_DIGESTS = ['off', 'daily', 'weekly'];
     /** Server limit for notification-settings recipients. */
@@ -128,7 +142,9 @@ final class EReportingEndpoint
      * Create a FRANCE compliance enrollment (DGFiP Flux 10) and provision the
      * provider account. By default the DGFiP tax-report setting is activated
      * immediately; pass $autoActivate = false to only create the account.
-     * For Norway use {@see createNorwayEnrollment()}.
+     * For Norway use {@see createNorwayEnrollment()}, for Germany
+     * {@see createGermanyEnrollment()}, for BE/NL/AT/IE/DK/SE/FI/EE/GB
+     * {@see createPeppolEnrollment()}.
      *
      * At least one of $siret (14 characters) / $siren (9 characters) is required.
      * $service picks the booked service ("e_reporting" — the server default — or
@@ -160,6 +176,12 @@ final class EReportingEndpoint
     ): ComplianceEnrollment {
         if ($country !== null && strtoupper($country) === 'NO') {
             throw new InvalidArgumentException('Norwegian enrollments use createNorwayEnrollment().');
+        }
+        if ($country !== null && strtoupper($country) === 'DE') {
+            throw new InvalidArgumentException('German enrollments use createGermanyEnrollment().');
+        }
+        if ($country !== null && in_array(strtoupper($country), self::PEPPOL_COUNTRIES, true)) {
+            throw new InvalidArgumentException(sprintf('%s enrollments use createPeppolEnrollment().', strtoupper($country)));
         }
         $this->assertEmail($email, 'email');
         if (preg_match('/^\d{2}$/', $nafCode) !== 1) {
@@ -244,17 +266,7 @@ final class EReportingEndpoint
     ): ComplianceEnrollment {
         $this->assertEmail($email, 'email');
         $orgNumber = $this->norwegianOrgNumber($orgNumber, 'orgNumber');
-        foreach ([
-            'companyName' => [$companyName, 255],
-            'address' => [$address, 255],
-            'city' => [$city, 100],
-            'postalcode' => [$postalcode, 20],
-        ] as $param => [$value, $max]) {
-            if (trim($value) === '') {
-                throw new InvalidArgumentException(sprintf('%s must not be empty.', $param));
-            }
-            $this->assertMaxLength($value, $max, $param);
-        }
+        $this->assertCompanyData($companyName, $address, $city, $postalcode);
         if ($legalCountry !== null) {
             $this->assertCountryCode($legalCountry, 'legalCountry');
         }
@@ -273,6 +285,132 @@ final class EReportingEndpoint
             'email' => $email,
             'vat_registered' => $vatRegistered,
             'enterprise_register' => $enterpriseRegister,
+            'reception' => $reception,
+            'reporting_start_date' => $reportingStartDate !== null ? $this->formatDate($reportingStartDate) : null,
+            'auto_activate' => $autoActivate,
+        ], static fn ($v) => $v !== null);
+
+        $payload = $this->jsonPost($this->uri('/compliance/enrollments'), $body);
+
+        return ComplianceEnrollment::fromArray($this->extractData($payload));
+    }
+
+    /**
+     * Create a GERMANY e-invoicing enrollment (EN 16931 per § 14 UStG). Invoices
+     * go out as ZUGFeRD (default) or XRechnung 3.0 — by e-mail to the buyer, or
+     * over Peppol to public buyers named by their Leitweg-ID. There is no
+     * activation step at the provider (no Peppol registration).
+     *
+     * $vatNumber is the German VAT number, "DE" + 9 digits (spaces accepted and
+     * stripped). Only domestic buyers are covered: the mandate applies when
+     * seller and buyer are both established in Germany.
+     *
+     * The company must have e-invoicing unlocked — otherwise the server answers
+     * 403 with code "service_not_active" ({@see HttpException}). Provider
+     * failures surface as an {@see HttpException} with status code 502.
+     */
+    public function createGermanyEnrollment(
+        string $email,
+        string $vatNumber,
+        string $companyName,
+        string $address,
+        string $city,
+        string $postalcode,
+        ?string $province = null,
+        DateTimeInterface|string|null $reportingStartDate = null,
+        ?bool $autoActivate = null,
+    ): ComplianceEnrollment {
+        $this->assertEmail($email, 'email');
+        $vatNumber = $this->compactVatNumber($vatNumber);
+        if (preg_match('/^DE\d{9}$/', $vatNumber) !== 1) {
+            throw new InvalidArgumentException('vatNumber must be a German VAT number: DE + 9 digits, e.g. DE123456789.');
+        }
+        $this->assertCompanyData($companyName, $address, $city, $postalcode);
+
+        $body = array_filter([
+            'country' => 'DE',
+            'service' => ComplianceService::E_INVOICING->value,
+            'vat_number' => $vatNumber,
+            'company_name' => $companyName,
+            'address' => $address,
+            'city' => $city,
+            'postalcode' => $postalcode,
+            'province' => $province,
+            'email' => $email,
+            'reporting_start_date' => $reportingStartDate !== null ? $this->formatDate($reportingStartDate) : null,
+            'auto_activate' => $autoActivate,
+        ], static fn ($v) => $v !== null);
+
+        $payload = $this->jsonPost($this->uri('/compliance/enrollments'), $body);
+
+        return ComplianceEnrollment::fromArray($this->extractData($payload));
+    }
+
+    /**
+     * Create an e-invoicing enrollment for a PEPPOL country — BE, NL, AT, IE,
+     * DK, SE, FI, EE or GB ({@see self::PEPPOL_COUNTRIES}) — sending Peppol BIS
+     * Billing 3.0 (regime peppol_bis3, like Norway). By default the company is
+     * registered on Peppol immediately; pass $autoActivate = false to only
+     * create the account.
+     *
+     * $peppolId is the company's own Peppol id: "scheme:value", or just the
+     * value under the country's usual scheme ({@see PeppolId::DEFAULT_SCHEMES},
+     * e.g. BE 0208 = enterprise number). It is registered on Peppol at
+     * activation, so it must not be registered with another access point.
+     * $vatNumber must carry the country prefix (e.g. BE0123456749).
+     *
+     * The company must have e-invoicing unlocked — otherwise the server answers
+     * 403 with code "service_not_active" ({@see HttpException}). Provider
+     * failures surface as an {@see HttpException} with status code 502.
+     *
+     * @param bool|null $reception also register to RECEIVE e-invoices over Peppol; server default false
+     */
+    public function createPeppolEnrollment(
+        string $country,
+        string $email,
+        string $vatNumber,
+        string $peppolId,
+        string $companyName,
+        string $address,
+        string $city,
+        string $postalcode,
+        ?bool $reception = null,
+        ?string $province = null,
+        DateTimeInterface|string|null $reportingStartDate = null,
+        ?bool $autoActivate = null,
+    ): ComplianceEnrollment {
+        $country = strtoupper(trim($country));
+        if (!in_array($country, self::PEPPOL_COUNTRIES, true)) {
+            throw new InvalidArgumentException(sprintf(
+                'country must be one of "%s", got "%s" (Norway: createNorwayEnrollment(), Germany: createGermanyEnrollment()).',
+                implode('", "', self::PEPPOL_COUNTRIES),
+                $country
+            ));
+        }
+        $this->assertEmail($email, 'email');
+        $vatNumber = $this->compactVatNumber($vatNumber);
+        if (preg_match('/^' . $country . '[0-9A-Z]{2,13}$/', $vatNumber) !== 1) {
+            throw new InvalidArgumentException(sprintf('vatNumber must be a %s VAT number starting with "%s".', $country, $country));
+        }
+        $parsedPeppolId = PeppolId::parse($peppolId, $country);
+        if ($parsedPeppolId === null) {
+            throw new InvalidArgumentException('peppolId must not be empty.');
+        }
+        $peppolId = $parsedPeppolId['scheme'] . ':' . $parsedPeppolId['value'];
+        $this->assertMaxLength($peppolId, 60, 'peppolId');
+        $this->assertCompanyData($companyName, $address, $city, $postalcode);
+
+        $body = array_filter([
+            'country' => $country,
+            'service' => ComplianceService::E_INVOICING->value,
+            'vat_number' => $vatNumber,
+            'peppol_id' => $peppolId,
+            'company_name' => $companyName,
+            'address' => $address,
+            'city' => $city,
+            'postalcode' => $postalcode,
+            'province' => $province,
+            'email' => $email,
             'reception' => $reception,
             'reporting_start_date' => $reportingStartDate !== null ? $this->formatDate($reportingStartDate) : null,
             'auto_activate' => $autoActivate,
@@ -447,6 +585,21 @@ final class EReportingEndpoint
      * $amendedNumber (+ optional $amendedDate). $buyerReference defaults
      * server-side to the buyer's organisation number (Peppol requires one).
      *
+     * Germany: the server requires $counterpartyName, $counterpartyAddress,
+     * $counterpartyCity, $counterpartyPostalcode and — unless $delivery is
+     * "download" or $buyerReference is a public buyer's Leitweg-ID —
+     * $counterpartyEmail (all unless $providerContactId is set). Buyers must be
+     * in Germany. $eInvoiceFormat picks ZUGFeRD (default) or XRechnung; a
+     * Leitweg-ID in $buyerReference always makes it an XRechnung sent over Peppol.
+     *
+     * BE/NL/AT/IE/DK/SE/FI/EE/GB: $counterpartyRegisterId is the buyer's Peppol
+     * id ("scheme:value" or the value under the buyer country's usual scheme,
+     * {@see PeppolId}) and $counterpartyName is required; $buyerReference
+     * defaults to the Peppol id's value.
+     *
+     * Germany and the Peppol countries: a reverse-charge line
+     * ({@see \Taxora\Sdk\ValueObjects\ComplianceLineTax::reverseCharge()}) requires $counterpartyVatNumber.
+     *
      * Creation is idempotent on the invoice's natural key (enrollment + type +
      * invoice number + invoice date + counterparty VAT): a retried create
      * returns the already-recorded transaction with HTTP 200 instead of 201 —
@@ -454,7 +607,8 @@ final class EReportingEndpoint
      * {@see HttpException} with status code 502.
      *
      * @param list<ComplianceInvoiceLine> $invoiceLines at least one line, each with at least one tax
-     * @param string|null $counterpartyRegisterId buyer's company register id (Norway: 9-digit organisation number, check digit validated)
+     * @param string|null $counterpartyRegisterId buyer's company register id (Norway: 9-digit organisation number, check digit validated;
+     *                                            Peppol countries: the buyer's Peppol id, "scheme:value" or the bare value)
      * @param string|null $extraInfo free-text invoice note (max 1000 characters); mandatory Norwegian notes are added server-side
      * @param string|null $invoicePdf e-invoicing only: your own invoice PDF, sent along as the e-invoice's visual
      *                                representation — a file path, the raw PDF bytes or an already base64-encoded PDF
@@ -465,6 +619,10 @@ final class EReportingEndpoint
      *                                        file's basename when $invoicePdf is a path, else server-side to the invoice number
      * @param string|null $internalReference your own reference (order number, ERP id; max 100 characters), stored for
      *                                       your search only — never sent to the buyer or the tax authority
+     * @param ComplianceEInvoiceFormat|string|null $eInvoiceFormat Germany only: "zugferd" (server default) or "xrechnung"
+     * @param ComplianceInvoiceDelivery|string|null $delivery Germany only: "email" (server default) sends the e-invoice to
+     *                                                        $counterpartyEmail; "download" sends no mail to the buyer —
+     *                                                        fetch the file with {@see getTransactionDocument()}
      */
     public function createTransaction(
         int $enrollmentId,
@@ -499,6 +657,8 @@ final class EReportingEndpoint
         ?string $invoicePdf = null,
         ?string $invoicePdfFilename = null,
         ?string $internalReference = null,
+        ComplianceEInvoiceFormat|string|null $eInvoiceFormat = null,
+        ComplianceInvoiceDelivery|string|null $delivery = null,
     ): ComplianceTransaction {
         $this->assertPositiveId($enrollmentId, 'enrollmentId');
         $type = $this->enumValue($transactionType, self::TRANSACTION_TYPES, 'transactionType');
@@ -530,6 +690,8 @@ final class EReportingEndpoint
             $amendedDate,
             $extraInfo,
             $counterpartyCountry,
+            $eInvoiceFormat,
+            $delivery,
         );
 
         $body = array_filter([
@@ -582,6 +744,9 @@ final class EReportingEndpoint
      * @param string $creditNoteNumber the credit note's own number (max 50 characters)
      * @param DateTimeInterface|string|null $invoiceDate defaults to today
      * @param list<ComplianceInvoiceLine>|null $invoiceLines partial credit: the credited lines
+     * @param ComplianceEInvoiceFormat|string|null $eInvoiceFormat Germany: format of the credit note (not taken from
+     *                                                            $original, which does not expose it; server default zugferd)
+     * @param ComplianceInvoiceDelivery|string|null $delivery Germany: "email" (server default) or "download"
      */
     public function createCreditNote(
         ComplianceTransaction $original,
@@ -596,6 +761,8 @@ final class EReportingEndpoint
         ?string $invoicePdf = null,
         ?string $invoicePdfFilename = null,
         ?bool $submitNow = null,
+        ComplianceEInvoiceFormat|string|null $eInvoiceFormat = null,
+        ComplianceInvoiceDelivery|string|null $delivery = null,
     ): ComplianceTransaction {
         if ($original->complianceEnrollmentId === null) {
             throw new InvalidArgumentException('The original transaction has no enrollment; load it with getTransaction().');
@@ -655,6 +822,8 @@ final class EReportingEndpoint
             invoicePdf: $invoicePdf,
             invoicePdfFilename: $invoicePdfFilename,
             internalReference: $internalReference,
+            eInvoiceFormat: $eInvoiceFormat,
+            delivery: $delivery,
         );
     }
 
@@ -763,7 +932,8 @@ final class EReportingEndpoint
      * (due_date, tax_amount, counterparty_*, …) cannot be explicitly cleared
      * through this method.
      *
-     * The e-invoicing fields ($counterpartyRegisterId … $extraInfo) behave as in
+     * The e-invoicing fields ($counterpartyRegisterId … $extraInfo, $eInvoiceFormat,
+     * $delivery) behave as in
      * {@see createTransaction()}; they are merged into the stored ones. $invoicePdf
      * (path, raw bytes or base64) replaces a PDF that is still waiting to be sent.
      *
@@ -804,6 +974,8 @@ final class EReportingEndpoint
         ?string $invoicePdf = null,
         ?string $invoicePdfFilename = null,
         ?string $internalReference = null,
+        ComplianceEInvoiceFormat|string|null $eInvoiceFormat = null,
+        ComplianceInvoiceDelivery|string|null $delivery = null,
     ): ComplianceTransaction {
         $this->assertPositiveId($id, 'id');
         if ($invoiceNumber !== null) {
@@ -853,6 +1025,8 @@ final class EReportingEndpoint
             $amendedDate,
             $extraInfo,
             $counterpartyCountry,
+            $eInvoiceFormat,
+            $delivery,
         ) + $this->invoicePdfFields($invoicePdf, $invoicePdfFilename);
 
         if ($body === []) {
@@ -1547,6 +1721,28 @@ final class EReportingEndpoint
         }
     }
 
+    /** Name and address of an enrolling company: required, within the server limits. */
+    private function assertCompanyData(string $companyName, string $address, string $city, string $postalcode): void
+    {
+        foreach ([
+            'companyName' => [$companyName, 255],
+            'address' => [$address, 255],
+            'city' => [$city, 100],
+            'postalcode' => [$postalcode, 20],
+        ] as $param => [$value, $max]) {
+            if (trim($value) === '') {
+                throw new InvalidArgumentException(sprintf('%s must not be empty.', $param));
+            }
+            $this->assertMaxLength($value, $max, $param);
+        }
+    }
+
+    /** "de 123 456 789" → "DE123456789", "BE 0123.456.749" → "BE0123456749". */
+    private function compactVatNumber(string $vatNumber): string
+    {
+        return strtoupper((string) preg_replace('/[\s.]+/', '', $vatNumber));
+    }
+
     /** Validate + normalise a Norwegian organisation number to its 9 digits. */
     private function norwegianOrgNumber(string $value, string $param): string
     {
@@ -1592,7 +1788,18 @@ final class EReportingEndpoint
         DateTimeInterface|string|null $amendedDate,
         ?string $extraInfo,
         ?string $counterpartyCountry = null,
+        ComplianceEInvoiceFormat|string|null $eInvoiceFormat = null,
+        ComplianceInvoiceDelivery|string|null $delivery = null,
     ): array {
+        if ($eInvoiceFormat !== null) {
+            $eInvoiceFormat = $this->enumValue($eInvoiceFormat, self::E_INVOICE_FORMATS, 'eInvoiceFormat');
+        }
+        if ($delivery !== null) {
+            $delivery = $this->enumValue($delivery, self::INVOICE_DELIVERIES, 'delivery');
+        }
+        if (($eInvoiceFormat !== null || $delivery !== null) && $counterpartyCountry !== null && $counterpartyCountry !== 'DE') {
+            throw new InvalidArgumentException('eInvoiceFormat and delivery apply to German e-invoices only (buyer in DE).');
+        }
         if ($counterpartyRegisterId !== null) {
             if (trim($counterpartyRegisterId) === '') {
                 throw new InvalidArgumentException('counterpartyRegisterId must not be empty.');
@@ -1628,6 +1835,8 @@ final class EReportingEndpoint
             'counterparty_postalcode' => $counterpartyPostalcode,
             'counterparty_email' => $counterpartyEmail,
             'buyer_reference' => $buyerReference,
+            'e_invoice_format' => $eInvoiceFormat,
+            'delivery' => $delivery,
             'is_credit_note' => $isCreditNote,
             'amended_number' => $amendedNumber,
             'amended_date' => $amendedDate !== null ? $this->formatDate($amendedDate) : null,

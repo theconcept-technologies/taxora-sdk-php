@@ -10,6 +10,8 @@ use Taxora\Sdk\Endpoints\EReportingEndpoint;
 use Taxora\Sdk\Enums\ComplianceDeliveryAction;
 use Taxora\Sdk\Enums\ApiVersion;
 use Taxora\Sdk\Enums\ComplianceDocumentType;
+use Taxora\Sdk\Enums\ComplianceEInvoiceFormat;
+use Taxora\Sdk\Enums\ComplianceInvoiceDelivery;
 use Taxora\Sdk\Enums\ComplianceEnrollmentStatus;
 use Taxora\Sdk\Enums\ComplianceService;
 use Taxora\Sdk\Enums\ComplianceTaxReportState;
@@ -1807,6 +1809,255 @@ final class EReportingEndpointTest extends TestCase
         $payload = json_decode((string) $http->requests[0]->getBody(), true);
         self::assertSame(['buyer_reference' => 'PO-4712', 'is_credit_note' => false], $payload);
         self::assertSame('PO-4712', $tx->buyerReference);
+    }
+
+    /* ---------- e-invoicing Germany (ZUGFeRD / XRechnung) + Peppol countries ---------- */
+
+    public function testCreateGermanyEnrollmentPostsGermanyBody(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::enrollmentPayload(['id' => 31, 'country' => 'de', 'regime' => 'en16931_de', 'service' => 'e_invoicing']),
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $enrollment = $this->createEndpoint($http)->createGermanyEnrollment(
+            email: 'rechnung@beispiel.de',
+            vatNumber: 'de 123 456 789',
+            companyName: 'Beispiel GmbH',
+            address: 'Hauptstraße 1',
+            city: 'Berlin',
+            postalcode: '10115',
+        );
+
+        $request = $http->requests[0];
+        self::assertSame('POST', $request->getMethod());
+        self::assertSame('/v1/compliance/enrollments', $request->getUri()->getPath());
+        self::assertSame([
+            'country' => 'DE',
+            'service' => 'e_invoicing',
+            'vat_number' => 'DE123456789',
+            'company_name' => 'Beispiel GmbH',
+            'address' => 'Hauptstraße 1',
+            'city' => 'Berlin',
+            'postalcode' => '10115',
+            'email' => 'rechnung@beispiel.de',
+        ], json_decode((string) $request->getBody(), true));
+
+        self::assertSame(ComplianceService::E_INVOICING, $enrollment->service);
+        self::assertSame('en16931_de', $enrollment->regime);
+    }
+
+    public function testCreateGermanyEnrollmentRejectsNonGermanVatNumberBeforeHttp(): void
+    {
+        $http = new SequenceHttpClient([]);
+
+        try {
+            $this->createEndpoint($http)->createGermanyEnrollment(
+                email: 'rechnung@beispiel.de',
+                vatNumber: 'ATU12345678',
+                companyName: 'Beispiel GmbH',
+                address: 'Hauptstraße 1',
+                city: 'Berlin',
+                postalcode: '10115',
+            );
+            self::fail('Expected InvalidArgumentException was not thrown.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertStringContainsString('vatNumber must be a German VAT number', $exception->getMessage());
+        }
+
+        self::assertCount(0, $http->requests);
+    }
+
+    public function testCreatePeppolEnrollmentPostsPeppolIdWithTheCountrysScheme(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::enrollmentPayload([
+                    'id' => 41,
+                    'country' => 'be',
+                    'regime' => 'peppol_bis3',
+                    'service' => 'e_invoicing',
+                    'company_register_id' => '0123456749',
+                    'company_register_scheme' => '0208',
+                ]),
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $enrollment = $this->createEndpoint($http)->createPeppolEnrollment(
+            country: 'be',
+            email: 'facturen@voorbeeld.be',
+            vatNumber: 'BE 0123.456.749',
+            peppolId: '0123.456.749',
+            companyName: 'Voorbeeld BV',
+            address: 'Grote Markt 1',
+            city: 'Brussel',
+            postalcode: '1000',
+            reception: true,
+        );
+
+        self::assertSame([
+            'country' => 'BE',
+            'service' => 'e_invoicing',
+            'vat_number' => 'BE0123456749',
+            'peppol_id' => '0208:0123456749',
+            'company_name' => 'Voorbeeld BV',
+            'address' => 'Grote Markt 1',
+            'city' => 'Brussel',
+            'postalcode' => '1000',
+            'email' => 'facturen@voorbeeld.be',
+            'reception' => true,
+        ], json_decode((string) $http->requests[0]->getBody(), true));
+        self::assertSame('peppol_bis3', $enrollment->regime);
+        self::assertSame('0208', $enrollment->companyRegisterScheme);
+    }
+
+    public function testCreatePeppolEnrollmentRejectsUnsupportedCountryAndWrongVatPrefix(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        try {
+            $endpoint->createPeppolEnrollment('DE', 'a@b.de', 'DE123456789', '0204:991-1', 'X', 'Y', 'Z', '1');
+            self::fail('DE is not a Peppol enrollment country.');
+        } catch (InvalidArgumentException $exception) {
+            self::assertStringContainsString('createGermanyEnrollment()', $exception->getMessage());
+        }
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('vatNumber must be a NL VAT number starting with "NL".');
+        $endpoint->createPeppolEnrollment('NL', 'a@b.nl', 'BE0123456749', '12345678', 'X', 'Y', 'Z', '1');
+    }
+
+    public function testCreateEnrollmentRedirectsGermanyAndPeppolCountries(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+        $args = ['email' => 'tax@acme.fr', 'nafCode' => '47', 'enterpriseSize' => 'pme', 'typeOperation' => 'mixed', 'reportingStartDate' => '2026-09-01', 'siren' => '123456789'];
+
+        foreach (['de' => 'German enrollments use createGermanyEnrollment().', 'SE' => 'SE enrollments use createPeppolEnrollment().'] as $country => $message) {
+            try {
+                $endpoint->createEnrollment(...$args, country: $country);
+                self::fail('Expected InvalidArgumentException was not thrown.');
+            } catch (InvalidArgumentException $exception) {
+                self::assertSame($message, $exception->getMessage());
+            }
+        }
+    }
+
+    public function testCreateTransactionSendsGermanFormatAndDelivery(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::norwayTransactionPayload(['country' => 'de', 'counterparty_country' => 'DE']),
+            ])),
+        ]);
+
+        $this->createEndpoint($http)->createTransaction(
+            enrollmentId: 31,
+            transactionType: ComplianceTransactionType::B2B_DOMESTIC_OUTBOUND,
+            invoiceNumber: 'DE-2027-0001',
+            invoiceDate: '2027-01-15',
+            subtotal: 1000,
+            total: 1190,
+            invoiceLines: [new ComplianceInvoiceLine('Beratung', 10, 100, [ComplianceLineTax::rate(19)])],
+            currency: 'EUR',
+            taxAmount: 190,
+            counterpartyName: 'Kunde GmbH',
+            counterpartyCountry: 'de',
+            counterpartyAddress: 'Marktplatz 2',
+            counterpartyCity: 'München',
+            counterpartyPostalcode: '80331',
+            eInvoiceFormat: ComplianceEInvoiceFormat::XRECHNUNG,
+            delivery: 'download',
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame('xrechnung', $payload['e_invoice_format']);
+        self::assertSame('download', $payload['delivery']);
+        self::assertSame('DE', $payload['counterparty_country']);
+        self::assertArrayNotHasKey('counterparty_email', $payload);
+    }
+
+    public function testCreateTransactionOmitsUnsetFormatAndDelivery(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode(['success' => true, 'data' => self::norwayTransactionPayload()])),
+        ]);
+
+        $this->createEndpoint($http)->createTransaction(
+            enrollmentId: 21,
+            transactionType: 'b2b_domestic_outbound',
+            invoiceNumber: 'NO-2026-0001',
+            invoiceDate: '2026-09-25',
+            subtotal: 1000,
+            total: 1250,
+            invoiceLines: [self::norwayLine()],
+            counterpartyRegisterId: '923609016',
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertArrayNotHasKey('e_invoice_format', $payload);
+        self::assertArrayNotHasKey('delivery', $payload);
+    }
+
+    public function testFormatAndDeliveryAreValidatedBeforeHttp(): void
+    {
+        $http = new SequenceHttpClient([]);
+        $endpoint = $this->createEndpoint($http);
+
+        foreach ([
+            [['eInvoiceFormat' => 'pdf'], 'eInvoiceFormat must be one of "zugferd", "xrechnung", got "pdf".'],
+            [['delivery' => 'peppol'], 'delivery must be one of "email", "download", got "peppol".'],
+            [['delivery' => ComplianceInvoiceDelivery::EMAIL, 'counterpartyCountry' => 'AT'], 'eInvoiceFormat and delivery apply to German e-invoices only (buyer in DE).'],
+        ] as [$args, $message]) {
+            try {
+                $endpoint->updateTransaction(88, ...$args);
+                self::fail('Expected InvalidArgumentException was not thrown.');
+            } catch (InvalidArgumentException $exception) {
+                self::assertSame($message, $exception->getMessage());
+            }
+        }
+
+        self::assertCount(0, $http->requests);
+    }
+
+    public function testUpdateTransactionSendsFormatAndDelivery(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode(['success' => true, 'data' => self::norwayTransactionPayload()])),
+        ]);
+
+        $this->createEndpoint($http)->updateTransaction(88, eInvoiceFormat: 'zugferd', delivery: ComplianceInvoiceDelivery::EMAIL);
+
+        self::assertSame(
+            ['e_invoice_format' => 'zugferd', 'delivery' => 'email'],
+            json_decode((string) $http->requests[0]->getBody(), true),
+        );
+    }
+
+    public function testCreateTransactionPassesPeppolBuyerIdThroughUnchecked(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode(['success' => true, 'data' => self::norwayTransactionPayload(['country' => 'be'])])),
+        ]);
+
+        $this->createEndpoint($http)->createTransaction(
+            enrollmentId: 41,
+            transactionType: 'b2b_domestic_outbound',
+            invoiceNumber: 'BE-2026-0001',
+            invoiceDate: '2026-11-12',
+            subtotal: 100,
+            total: 121,
+            invoiceLines: [new ComplianceInvoiceLine('Advies', 1, 100, [ComplianceLineTax::rate(21)])],
+            counterpartyName: 'Koper NV',
+            counterpartyCountry: 'BE',
+            counterpartyRegisterId: '0208:0987654321',
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame('0208:0987654321', $payload['counterparty_register_id']);
     }
 
     public function testListTransactionsFiltersByEnrollmentAndCountry(): void
