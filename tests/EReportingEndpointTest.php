@@ -1890,6 +1890,49 @@ final class EReportingEndpointTest extends TestCase
         self::assertSame('en16931_de', $enrollment->regime);
     }
 
+    public function testCreateGermanyEnrollmentSendsSellerContactAndIban(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::enrollmentPayload(['id' => 32, 'country' => 'de', 'regime' => 'en16931_de', 'service' => 'e_invoicing']),
+            ], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $this->createEndpoint($http)->createGermanyEnrollment(
+            email: 'rechnung@beispiel.de',
+            vatNumber: 'DE123456789',
+            companyName: 'Beispiel GmbH',
+            address: 'Hauptstraße 1',
+            city: 'Berlin',
+            postalcode: '10115',
+            contactPerson: ' Erika Muster ',
+            phone: '+49 30 123456',
+            iban: 'de89 3704 0044 0532 0130 00',
+            bic: 'cobadeffxxx',
+        );
+
+        $body = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame('Erika Muster', $body['contact_person']);
+        self::assertSame('+49 30 123456', $body['phone']);
+        self::assertSame('DE89370400440532013000', $body['iban']);
+        self::assertSame('COBADEFFXXX', $body['bic']);
+    }
+
+    public function testCreateGermanyEnrollmentRejectsAnInvalidIbanBeforeHttp(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->createEndpoint(new SequenceHttpClient([]))->createGermanyEnrollment(
+            email: 'rechnung@beispiel.de',
+            vatNumber: 'DE123456789',
+            companyName: 'Beispiel GmbH',
+            address: 'Hauptstraße 1',
+            city: 'Berlin',
+            postalcode: '10115',
+            iban: 'not-an-iban',
+        );
+    }
+
     public function testCreateGermanyEnrollmentRejectsNonGermanVatNumberBeforeHttp(): void
     {
         $http = new SequenceHttpClient([]);

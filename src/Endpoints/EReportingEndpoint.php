@@ -337,6 +337,13 @@ final class EReportingEndpoint
      * stripped). Only domestic buyers are covered: the mandate applies when
      * seller and buyer are both established in Germany.
      *
+     * $contactPerson and $phone are the seller contact printed on every XRechnung
+     * (BT-41/42). The API requires them (422 without); they are optional here
+     * only so existing call sites keep compiling. With $iban (and optionally
+     * $bic) every invoice without its own payment method goes out as SEPA credit
+     * transfer (58) to that account; without it, an XRechnung needs a payment
+     * method on each invoice.
+     *
      * The company must have e-invoicing unlocked — otherwise the server answers
      * 403 with code "service_not_active" ({@see HttpException}). Provider
      * failures surface as an {@see HttpException} with status code 502.
@@ -351,9 +358,19 @@ final class EReportingEndpoint
         ?string $province = null,
         DateTimeInterface|string|null $reportingStartDate = null,
         ?bool $autoActivate = null,
+        ?string $contactPerson = null,
+        ?string $phone = null,
+        ?string $iban = null,
+        ?string $bic = null,
     ): ComplianceEnrollment {
         $this->assertEmail($email, 'email');
         $vatNumber = $this->compactVatNumber($vatNumber);
+        if ($iban !== null) {
+            $iban = strtoupper((string) preg_replace('/\s+/', '', $iban));
+            if (preg_match('/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/', $iban) !== 1) {
+                throw new InvalidArgumentException('iban must be a valid IBAN, e.g. DE89370400440532013000.');
+            }
+        }
         if (preg_match('/^DE\d{9}$/', $vatNumber) !== 1) {
             throw new InvalidArgumentException('vatNumber must be a German VAT number: DE + 9 digits, e.g. DE123456789.');
         }
@@ -371,6 +388,10 @@ final class EReportingEndpoint
             'email' => $email,
             'reporting_start_date' => $reportingStartDate !== null ? $this->formatDate($reportingStartDate) : null,
             'auto_activate' => $autoActivate,
+            'contact_person' => $contactPerson !== null && trim($contactPerson) !== '' ? trim($contactPerson) : null,
+            'phone' => $phone !== null && trim($phone) !== '' ? trim($phone) : null,
+            'iban' => $iban,
+            'bic' => $bic !== null && trim($bic) !== '' ? strtoupper((string) preg_replace('/\s+/', '', $bic)) : null,
         ], static fn ($v) => $v !== null);
 
         $payload = $this->jsonPost($this->uri('/compliance/enrollments'), $body);

@@ -2,6 +2,17 @@
 
 Release notes for earlier versions are on the GitHub releases page.
 
+## Unreleased
+
+Germany: XRechnung needs the seller contact.
+
+- `createGermanyEnrollment()` takes `contactPerson` and `phone`. They are the seller contact
+  printed on every XRechnung (BT-41/42), which is always used for public buyers. **The API now
+  requires both for Germany** and answers 422 without them.
+- `createGermanyEnrollment()` takes an optional `iban` (+ `bic`). Every German invoice without its
+  own payment method then goes out as SEPA credit transfer (58) to that account. Without it, an
+  XRechnung needs `paymentMethod` on each invoice (e.g. 58 = SEPA credit transfer).
+
 ## 1.16.0
 
 France enrollment: VAT regime and switching from another platform.
