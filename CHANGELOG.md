@@ -2,7 +2,7 @@
 
 Release notes for earlier versions are on the GitHub releases page.
 
-## Unreleased
+## 1.17.0
 
 Germany: XRechnung needs the seller contact.
 
