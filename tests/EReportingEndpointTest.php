@@ -505,6 +505,55 @@ final class EReportingEndpointTest extends TestCase
 
     /* ---------- transactions ---------- */
 
+    public function testCreateTransactionSendsPaymentMeansByNameAndPaidAmount(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode(['success' => true, 'data' => self::transactionPayload()], JSON_UNESCAPED_SLASHES)),
+        ]);
+
+        $this->createEndpoint($http)->createTransaction(
+            enrollmentId: 12,
+            transactionType: ComplianceTransactionType::B2C_OUTBOUND,
+            invoiceNumber: 'SHOP-1',
+            invoiceDate: '2026-06-15',
+            subtotal: 100,
+            total: 120,
+            invoiceLines: [new ComplianceInvoiceLine(description: 'Item', quantity: 1, price: 100, taxes: [new ComplianceLineTax(name: 'VAT', percent: 20, category: 'S')])],
+            taxAmount: 20,
+            paymentMethod: \Taxora\Sdk\Enums\ComplianceInvoicePaymentMeans::ONLINE_PAYMENT,
+            paymentMethodText: 'PayPal',
+            paidAmount: 120,
+        );
+
+        $body = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame('online_payment', $body['payment_method']);
+        self::assertSame('PayPal', $body['payment_method_text']);
+        self::assertSame('120.00', $body['paid_amount']);
+    }
+
+    public function testCreateTransactionRefusesBadPaymentInputBeforeHttp(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+        $base = [
+            'enrollmentId' => 12, 'transactionType' => ComplianceTransactionType::B2C_OUTBOUND, 'invoiceNumber' => 'SHOP-2',
+            'invoiceDate' => '2026-06-15', 'subtotal' => 100, 'total' => 120, 'taxAmount' => 20,
+            'invoiceLines' => [new ComplianceInvoiceLine(description: 'Item', quantity: 1, price: 100, taxes: [new ComplianceLineTax(name: 'VAT', percent: 20, category: 'S')])],
+        ];
+
+        foreach ([
+            ['paymentMethod' => 'paypal'],
+            ['paymentMethod' => \Taxora\Sdk\Enums\ComplianceInvoicePaymentMeans::OTHER],
+            ['paidAmount' => -1],
+        ] as $bad) {
+            try {
+                $endpoint->createTransaction(...($base + $bad));
+                self::fail('expected InvalidArgumentException for ' . json_encode(array_keys($bad)));
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
     public function testCreateTransactionPostsWireBodyAndReturnsTransaction(): void
     {
         $http = new SequenceHttpClient([

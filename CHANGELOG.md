@@ -11,7 +11,14 @@ Germany: XRechnung needs the seller contact.
   requires both for Germany** and answers 422 without them.
 - `createGermanyEnrollment()` takes an optional `iban` (+ `bic`). Every German invoice without its
   own payment method then goes out as SEPA credit transfer (58) to that account. Without it, an
-  XRechnung needs `paymentMethod` on each invoice (e.g. 58 = SEPA credit transfer).
+  XRechnung needs `paymentMethod` on each invoice.
+- New enum `ComplianceInvoicePaymentMeans` for `paymentMethod` on `createTransaction()` /
+  `updateTransaction()`: `SEPA_CREDIT_TRANSFER`, `CREDIT_TRANSFER`, `SEPA_DIRECT_DEBIT`,
+  `DIRECT_DEBIT`, `CREDIT_CARD`, `DEBIT_CARD`, `ONLINE_PAYMENT` (PayPal, Klarna, …), `CASH`,
+  `CHEQUE`, `OTHER`. `ONLINE_PAYMENT` and `OTHER` need `paymentMethodText` (e.g. "PayPal").
+  Older integer ids still work.
+- New `paidAmount` on `createTransaction()` / `updateTransaction()`: for orders already paid at
+  checkout. The e-invoice shows the amount as prepaid and nothing as due.
 
 ## 1.16.0
 

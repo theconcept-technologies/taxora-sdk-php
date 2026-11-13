@@ -17,6 +17,7 @@ use Taxora\Sdk\Enums\ApiVersion;
 use Taxora\Sdk\Enums\ComplianceDocumentType;
 use Taxora\Sdk\Enums\ComplianceEInvoiceFormat;
 use Taxora\Sdk\Enums\ComplianceInvoiceDelivery;
+use Taxora\Sdk\Enums\ComplianceInvoicePaymentMeans;
 use Taxora\Sdk\Enums\ComplianceService;
 use Taxora\Sdk\Enums\ComplianceTaxReportState;
 use Taxora\Sdk\Enums\ComplianceTransactionState;
@@ -692,7 +693,7 @@ final class EReportingEndpoint
         ?string $counterpartyCountry = null,
         ?string $counterpartyVatNumber = null,
         ?string $providerContactId = null,
-        ?int $paymentMethod = null,
+        ComplianceInvoicePaymentMeans|string|int|null $paymentMethod = null,
         ?string $remittanceInformation = null,
         ?string $paymentMethodText = null,
         ?string $paymentTerms = null,
@@ -712,7 +713,9 @@ final class EReportingEndpoint
         ?string $internalReference = null,
         ComplianceEInvoiceFormat|string|null $eInvoiceFormat = null,
         ComplianceInvoiceDelivery|string|null $delivery = null,
+        float|int|string|null $paidAmount = null,
     ): ComplianceTransaction {
+        [$paymentMethod, $paidAmount] = $this->normalizePayment($paymentMethod, $paymentMethodText, $paidAmount);
         $this->assertPositiveId($enrollmentId, 'enrollmentId');
         $type = $this->enumValue($transactionType, self::TRANSACTION_TYPES, 'transactionType');
         $this->assertInvoiceNumber($invoiceNumber);
@@ -763,6 +766,7 @@ final class EReportingEndpoint
             'provider_contact_id' => $providerContactId,
             'invoice_lines_attributes' => $this->invoiceLinesToArray($invoiceLines),
             'payment_method' => $paymentMethod,
+            'paid_amount' => $paidAmount,
             'remittance_information' => $remittanceInformation,
             'payment_method_text' => $paymentMethodText,
             'payment_terms' => $paymentTerms,
@@ -1010,7 +1014,7 @@ final class EReportingEndpoint
         ?string $counterpartyVatNumber = null,
         ?string $providerContactId = null,
         ?array $invoiceLines = null,
-        ?int $paymentMethod = null,
+        ComplianceInvoicePaymentMeans|string|int|null $paymentMethod = null,
         ?string $remittanceInformation = null,
         ?string $paymentMethodText = null,
         ?string $paymentTerms = null,
@@ -1029,7 +1033,9 @@ final class EReportingEndpoint
         ?string $internalReference = null,
         ComplianceEInvoiceFormat|string|null $eInvoiceFormat = null,
         ComplianceInvoiceDelivery|string|null $delivery = null,
+        float|int|string|null $paidAmount = null,
     ): ComplianceTransaction {
+        [$paymentMethod, $paidAmount] = $this->normalizePayment($paymentMethod, $paymentMethodText, $paidAmount);
         $this->assertPositiveId($id, 'id');
         if ($invoiceNumber !== null) {
             $this->assertInvoiceNumber($invoiceNumber);
@@ -1062,6 +1068,7 @@ final class EReportingEndpoint
             'provider_contact_id' => $providerContactId,
             'invoice_lines_attributes' => $invoiceLines !== null ? $this->invoiceLinesToArray($invoiceLines) : null,
             'payment_method' => $paymentMethod,
+            'paid_amount' => $paidAmount,
             'remittance_information' => $remittanceInformation,
             'payment_method_text' => $paymentMethodText,
             'payment_terms' => $paymentTerms,
@@ -1649,6 +1656,49 @@ final class EReportingEndpoint
      *
      * @param list<string> $allowed
      */
+    /**
+     * Payment means as the API name ("online_payment"), or a raw provider id from older
+     * callers; online payment / other need a text; the paid amount must not be negative.
+     *
+     * @return array{0: int|string|null, 1: string|null}
+     */
+    private function normalizePayment(
+        ComplianceInvoicePaymentMeans|string|int|null $paymentMethod,
+        ?string $paymentMethodText,
+        float|int|string|null $paidAmount,
+    ): array {
+        $method = null;
+        if ($paymentMethod instanceof ComplianceInvoicePaymentMeans) {
+            $method = $paymentMethod;
+        } elseif (is_string($paymentMethod) && !ctype_digit($paymentMethod)) {
+            $method = ComplianceInvoicePaymentMeans::tryFrom(strtolower(trim($paymentMethod)));
+            if ($method === null) {
+                throw new InvalidArgumentException(sprintf(
+                    'paymentMethod must be one of "%s", got "%s".',
+                    implode('", "', array_map(static fn (ComplianceInvoicePaymentMeans $m): string => $m->value, ComplianceInvoicePaymentMeans::cases())),
+                    $paymentMethod
+                ));
+            }
+        }
+        if ($method !== null && $method->needsText() && trim((string) $paymentMethodText) === '') {
+            throw new InvalidArgumentException(sprintf('paymentMethod "%s" needs paymentMethodText, e.g. "PayPal" or "Klarna".', $method->value));
+        }
+
+        $value = $method !== null
+            ? $method->value
+            : (is_int($paymentMethod) || is_string($paymentMethod) ? (int) $paymentMethod : null);
+
+        if ($paidAmount !== null) {
+            $this->assertAmount($paidAmount, 'paidAmount');
+            if ((float) $paidAmount < 0) {
+                throw new InvalidArgumentException('paidAmount cannot be negative.');
+            }
+            $paidAmount = number_format((float) $paidAmount, 2, '.', '');
+        }
+
+        return [$value, $paidAmount];
+    }
+
     private function enumValue(BackedEnum|string $value, array $allowed, string $param): string
     {
         $raw = $value instanceof BackedEnum ? (string) $value->value : $value;
