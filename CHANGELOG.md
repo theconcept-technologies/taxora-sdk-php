@@ -2,7 +2,7 @@
 
 Release notes for earlier versions are on the GitHub releases page.
 
-## Unreleased
+## 1.16.0
 
 France enrollment: VAT regime and switching from another platform.
 
