@@ -308,6 +308,7 @@ $enrollment = $client->eReporting()->createEnrollment(
     nafCode: $prefill->nafCode ?? '47',      // 2-digit NAF division (required)
     enterpriseSize: $prefill->enterpriseSize ?? 'pme', // micro | pme | eti | ge
     typeOperation: 'mixed',                  // services | goods | mixed
+    vatRegime: 'reel_normal_mensuel',        // required by the API — see EReportingEndpoint::VAT_REGIMES
     reportingStartDate: '2026-09-01',        // Y-m-d or DateTimeInterface
     siret: $prefill->siret,                  // 14 chars — at least one of siret/siren
     siren: $prefill->siren,                  // 9-char fallback when no head office SIRET exists
@@ -316,6 +317,7 @@ $enrollment = $client->eReporting()->createEnrollment(
     city: $prefill->city,
     postalcode: $prefill->postalcode,
     autoActivate: true,                      // false = create the account only
+    // migrationCode: 'ABC-123',             // only when switching from another approved platform (PA)
 );
 
 echo $enrollment->status->value;             // e.g. regime_activated

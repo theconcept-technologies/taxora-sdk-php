@@ -2,6 +2,18 @@
 
 Release notes for earlier versions are on the GitHub releases page.
 
+## Unreleased
+
+France enrollment: VAT regime and switching from another platform.
+
+- `createEnrollment()`: new `vatRegime` (`EReportingEndpoint::VAT_REGIMES`:
+  `reel_normal_mensuel`, `reel_normal_trimestriel`, `simplifie`, `franchise_en_base`).
+  The API now requires it for France and answers 422 without it. Most foreign companies
+  with a French VAT number file monthly: `reel_normal_mensuel`.
+- `createEnrollment()`: new `migrationCode` for a company already registered with another
+  approved platform (PA). Pass the one-time code that platform issued; it is used once
+  and never returned.
+
 ## 1.15.0
 
 E-invoicing for Germany and nine Peppol countries.

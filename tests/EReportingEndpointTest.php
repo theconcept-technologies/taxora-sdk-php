@@ -106,6 +106,47 @@ final class EReportingEndpointTest extends TestCase
         self::assertTrue($enrollment->autoSend);
     }
 
+    public function testCreateEnrollmentSendsVatRegimeAndMigrationCode(): void
+    {
+        $http = new SequenceHttpClient([
+            new Response(201, ['Content-Type' => 'application/json'], json_encode([
+                'success' => true,
+                'data' => self::enrollmentPayload(),
+            ])),
+        ]);
+
+        $this->createEndpoint($http)->createEnrollment(
+            email: 'tax@acme.fr',
+            nafCode: '47',
+            enterpriseSize: 'pme',
+            typeOperation: 'goods',
+            reportingStartDate: '2026-09-01',
+            siret: '12345678900012',
+            vatRegime: 'reel_normal_mensuel',
+            migrationCode: '  MIG-123  ',
+        );
+
+        $payload = json_decode((string) $http->requests[0]->getBody(), true);
+        self::assertSame('reel_normal_mensuel', $payload['vat_regime']);
+        self::assertTrue($payload['migrating']);
+        self::assertSame('MIG-123', $payload['migration_code']);
+    }
+
+    public function testCreateEnrollmentRejectsUnknownVatRegimeAndEmptyMigrationCode(): void
+    {
+        $endpoint = $this->createEndpoint(new SequenceHttpClient([]));
+
+        try {
+            $endpoint->createEnrollment(email: 'tax@acme.fr', nafCode: '47', enterpriseSize: 'pme', typeOperation: 'goods', reportingStartDate: '2026-09-01', siret: '12345678900012', vatRegime: 'monthly');
+            self::fail('unknown vatRegime must be rejected');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('vatRegime', $e->getMessage());
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+        $endpoint->createEnrollment(email: 'tax@acme.fr', nafCode: '47', enterpriseSize: 'pme', typeOperation: 'goods', reportingStartDate: '2026-09-01', siret: '12345678900012', vatRegime: 'simplifie', migrationCode: ' ');
+    }
+
     public function testCreateEnrollmentWithSirenOnlyOmitsNullFields(): void
     {
         $http = new SequenceHttpClient([

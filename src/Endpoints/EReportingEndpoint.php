@@ -92,6 +92,16 @@ final class EReportingEndpoint
     private const INTERVALS = ['day', 'week', 'month'];
     private const ENTERPRISE_SIZES = ['micro', 'pme', 'eti', 'ge'];
     private const TYPE_OPERATIONS = ['services', 'goods', 'mixed'];
+
+    /**
+     * French VAT regimes (régime d'imposition TVA) for {@see createEnrollment()}.
+     * They set how often e-reporting data goes to the tax office:
+     *  - reel_normal_mensuel     monthly VAT return (CA3) — almost every foreign company with a French VAT number
+     *  - reel_normal_trimestriel quarterly CA3 (only with less than €4,000 VAT a year)
+     *  - simplifie               yearly return (CA12); abolished on 2027-01-01
+     *  - franchise_en_base       small business, no French VAT charged
+     */
+    public const VAT_REGIMES = ['reel_normal_mensuel', 'reel_normal_trimestriel', 'simplifie', 'franchise_en_base'];
     private const TRANSACTION_TYPES = [
         'b2c_outbound',
         'b2b_domestic_outbound',
@@ -151,6 +161,14 @@ final class EReportingEndpoint
      * "e_invoicing"); the company must have that service unlocked, otherwise the
      * server answers 403 with code "service_not_active" ({@see HttpException}).
      *
+     * $vatRegime is the company's French VAT regime ({@see self::VAT_REGIMES}). The
+     * API requires it (422 without); it stays optional here only so existing call
+     * sites keep compiling.
+     *
+     * $migrationCode: when the company is already registered with another approved
+     * platform (PA), pass the one-time migration code that platform issued. It is
+     * used once at activation and never returned by the API.
+     *
      * Provider failures surface as an {@see HttpException} with status code 502 —
      * the enrollment is persisted server-side in an error state and shows up in
      * listEnrollments() for retries.
@@ -173,6 +191,8 @@ final class EReportingEndpoint
         ?string $regime = null,
         ?bool $autoActivate = null,
         ComplianceService|string|null $service = null,
+        ?string $vatRegime = null,
+        ?string $migrationCode = null,
     ): ComplianceEnrollment {
         if ($country !== null && strtoupper($country) === 'NO') {
             throw new InvalidArgumentException('Norwegian enrollments use createNorwayEnrollment().');
@@ -189,6 +209,15 @@ final class EReportingEndpoint
         }
         $enterpriseSize = $this->enumValue($enterpriseSize, self::ENTERPRISE_SIZES, 'enterpriseSize');
         $typeOperation = $this->enumValue($typeOperation, self::TYPE_OPERATIONS, 'typeOperation');
+        if ($vatRegime !== null) {
+            $vatRegime = $this->enumValue($vatRegime, self::VAT_REGIMES, 'vatRegime');
+        }
+        if ($migrationCode !== null) {
+            $migrationCode = trim($migrationCode);
+            if ($migrationCode === '') {
+                throw new InvalidArgumentException('migrationCode must not be empty; pass null when the company is not switching from another platform.');
+            }
+        }
         if ($siret === null && $siren === null) {
             throw new InvalidArgumentException('At least one of siret or siren is required.');
         }
@@ -218,8 +247,11 @@ final class EReportingEndpoint
             'naf_code' => $nafCode,
             'enterprise_size' => $enterpriseSize,
             'type_operation' => $typeOperation,
+            'vat_regime' => $vatRegime,
             'reporting_start_date' => $this->formatDate($reportingStartDate),
             'auto_activate' => $autoActivate,
+            'migrating' => $migrationCode !== null ? true : null,
+            'migration_code' => $migrationCode,
         ], static fn ($v) => $v !== null);
 
         $payload = $this->jsonPost($this->uri('/compliance/enrollments'), $body);
